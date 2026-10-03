@@ -111,9 +111,9 @@ export const submitMockQuiz = async (payload) => {
   return await api.post('/quizzes/submit', payload);
 };
 
-// Technical Mock Interview Endpoints
-export const createInterviewSession = async () => {
-  return await api.post('/interviews/session');
+// Technical & HR Mock Interview Endpoints
+export const createInterviewSession = async (interviewType = 'technical') => {
+  return await api.post('/interviews/session', { interviewType });
 };
 
 export const startInterviewSession = async (id) => {
@@ -136,8 +136,9 @@ export const endInterviewSession = async (id, payload = {}) => {
   return await api.post(`/interviews/${id}/end`, payload);
 };
 
-export const fetchInterviewHistory = async () => {
-  return await api.get('/interviews/history');
+export const fetchInterviewHistory = async (interviewType) => {
+  const url = interviewType ? `/interviews/history?type=${interviewType}` : '/interviews/history';
+  return await api.get(url);
 };
 
 export const fetchInterviewEvaluation = async (id) => {

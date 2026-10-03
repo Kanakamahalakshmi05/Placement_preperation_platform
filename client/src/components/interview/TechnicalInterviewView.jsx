@@ -32,9 +32,26 @@ import {
   ChevronRight,
   FastForward,
   Maximize2,
+  Code2,
+  User as UserIcon,
+  UserCheck,
 } from 'lucide-react';
 
-const TechnicalInterviewView = ({ companyName, targetRole, onBackToDashboard }) => {
+const TechnicalInterviewView = ({
+  initialInterviewType = 'technical',
+  companyName,
+  targetRole,
+  onBackToDashboard,
+}) => {
+  // Active interview mode state: 'technical' | 'hr'
+  const [selectedInterviewType, setSelectedInterviewType] = useState(initialInterviewType);
+  const [historyFilter, setHistoryFilter] = useState(initialInterviewType === 'hr' ? 'hr' : 'technical');
+
+  useEffect(() => {
+    setSelectedInterviewType(initialInterviewType);
+    setHistoryFilter(initialInterviewType === 'hr' ? 'hr' : 'technical');
+  }, [initialInterviewType]);
+
   // Navigation states: 'landing' | 'check' | 'interview' | 'evaluating' | 'evaluation'
   const [viewState, setViewState] = useState('landing');
   const [history, setHistory] = useState([]);
@@ -676,10 +693,11 @@ const TechnicalInterviewView = ({ companyName, targetRole, onBackToDashboard }) 
   };
 
   // 1. Take Mock Interview -> Create Session and go to Check
-  const handleTakeMockInterview = async () => {
+  const handleTakeMockInterview = async (overrideType) => {
+    const typeToUse = overrideType || selectedInterviewType || 'technical';
     setMediaError(null);
     try {
-      const res = await createInterviewSession();
+      const res = await createInterviewSession(typeToUse);
       if (res.success && res.data) {
         currentSessionRef.current = res.data;
         setCurrentSession(res.data);
@@ -873,73 +891,153 @@ const TechnicalInterviewView = ({ companyName, targetRole, onBackToDashboard }) 
   // VIEW 1: LANDING PAGE
   // =========================================================================
   if (viewState === 'landing') {
+    const isHrLanding = selectedInterviewType === 'hr';
+
+    // Filter history based on historyFilter tab
+    const filteredHistory = history.filter((item) => {
+      if (historyFilter === 'technical') return (item.interviewType || 'technical') === 'technical';
+      if (historyFilter === 'hr') return item.interviewType === 'hr';
+      return true;
+    });
+
     return (
       <div className="space-y-8 max-w-5xl mx-auto pb-12">
-        {/* Top Header */}
-        <div>
-          <h1 className="text-2xl font-extrabold text-white tracking-tight">
-            Technical Interview
-          </h1>
-          <p className="text-xs text-slate-400 mt-1">
-            Practice realistic technical interviews with an AI interviewer based on your resume and target company requirements.
-          </p>
+        {/* Top Header with Mode Selector Tabs */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-5">
+          <div>
+            <h1 className="text-2xl font-extrabold text-white tracking-tight">
+              {isHrLanding ? 'HR Behavioral Interview' : 'Technical Mock Interview'}
+            </h1>
+            <p className="text-xs text-slate-400 mt-1">
+              {isHrLanding
+                ? 'Practice realistic HR & behavioral interviews using your resume, target company, and target role context.'
+                : 'Practice realistic technical interviews with an AI interviewer based on your resume and target company requirements.'}
+            </p>
+          </div>
+
+          {/* Mode Switcher Buttons */}
+          <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-2xl shrink-0">
+            <button
+              onClick={() => setSelectedInterviewType('technical')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 ${
+                !isHrLanding
+                  ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <Code2 className="w-3.5 h-3.5" />
+              <span>Technical Interview</span>
+            </button>
+            <button
+              onClick={() => setSelectedInterviewType('hr')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 ${
+                isHrLanding
+                  ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              <UserIcon className="w-3.5 h-3.5" />
+              <span>HR Mock Interview</span>
+            </button>
+          </div>
         </div>
 
-        {/* Hero Card: Technical Mock Interview */}
-        <div className="glass-panel p-8 rounded-3xl border border-slate-800 relative overflow-hidden bg-gradient-to-br from-slate-900/90 via-slate-950/80 to-indigo-950/20">
+        {/* Hero Card */}
+        <div className={`glass-panel p-8 rounded-3xl border border-slate-800 relative overflow-hidden bg-gradient-to-br ${
+          isHrLanding
+            ? 'from-slate-900/90 via-slate-950/80 to-emerald-950/20'
+            : 'from-slate-900/90 via-slate-950/80 to-indigo-950/20'
+        }`}>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
             <div className="space-y-4 max-w-xl">
-              <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-400 text-xs font-bold uppercase tracking-wider">
+              <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider border ${
+                isHrLanding
+                  ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400'
+                  : 'bg-brand-500/10 border-brand-500/20 text-brand-400'
+              }`}>
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>Technical Mock Interview</span>
+                <span>{isHrLanding ? 'HR & Behavioral Assessment' : 'Technical Mock Interview'}</span>
               </div>
 
               <div>
                 <h2 className="text-xl font-bold text-white">
-                  20-Minute AI Technical Interview
+                  {isHrLanding ? '20-Minute AI HR Behavioral Interview' : '20-Minute AI Technical Interview'}
                 </h2>
                 <div className="flex items-center space-x-2 text-xs text-slate-400 mt-1">
-                  <Clock className="w-4 h-4 text-brand-400" />
+                  <Clock className={`w-4 h-4 ${isHrLanding ? 'text-emerald-400' : 'text-brand-400'}`} />
                   <span>Duration: <strong>20 Minutes</strong></span>
                 </div>
               </div>
 
               <div className="text-xs text-slate-300 space-y-2 pt-2">
                 <p className="font-semibold text-slate-200">
-                  The AI interviewer will ask technical questions based on:
+                  {isHrLanding
+                    ? 'The AI HR interviewer will evaluate you on:'
+                    : 'The AI technical interviewer will ask questions based on:'}
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-300">
-                  <div className="flex items-center space-x-2">
-                    <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                    <span>Your resume</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                    <span>Your projects</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                    <span>Your technical skills</span>
-                  </div>
-                  <div className="flex items-center space-x-2">
-                    <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                    <span>Company Job Description</span>
-                  </div>
-                  <div className="flex items-center space-x-2 sm:col-span-2">
-                    <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                    <span>Your previous interview performance</span>
-                  </div>
+                  {isHrLanding ? (
+                    <>
+                      <div className="flex items-center space-x-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Behavioral & STAR method</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Teamwork & leadership</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Conflict resolution & pressure</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Role & company motivation</span>
+                      </div>
+                      <div className="flex items-center space-x-2 sm:col-span-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Previous HR interview weaknesses & adaptivity</span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center space-x-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Your resume</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Your projects</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Your technical skills</span>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Company Job Description</span>
+                      </div>
+                      <div className="flex items-center space-x-2 sm:col-span-2">
+                        <Check className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                        <span>Your previous technical interview performance</span>
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
 
             <div className="shrink-0 w-full md:w-auto">
               <button
-                onClick={handleTakeMockInterview}
-                className="w-full md:w-auto px-8 py-4 bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white font-bold text-sm rounded-2xl shadow-xl shadow-brand-500/25 transition transform hover:scale-[1.02] flex items-center justify-center space-x-2"
+                onClick={() => handleTakeMockInterview(selectedInterviewType)}
+                className={`w-full md:w-auto px-8 py-4 text-white font-bold text-sm rounded-2xl shadow-xl transition transform hover:scale-[1.02] flex items-center justify-center space-x-2 ${
+                  isHrLanding
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/25'
+                    : 'bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 shadow-brand-500/25'
+                }`}
               >
                 <Play className="w-4 h-4 fill-white" />
-                <span>Take Mock Interview</span>
+                <span>Take {isHrLanding ? 'HR' : 'Technical'} Mock Interview</span>
               </button>
             </div>
           </div>
@@ -947,30 +1045,56 @@ const TechnicalInterviewView = ({ companyName, targetRole, onBackToDashboard }) 
 
         {/* Previous Mock Interviews Section */}
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <h2 className="text-base font-bold text-white tracking-tight">
               Previous Mock Interviews
             </h2>
-            <span className="text-xs text-slate-400">
-              {history.length} completed {history.length === 1 ? 'attempt' : 'attempts'}
-            </span>
+
+            {/* Filter Tabs: All | Technical | HR */}
+            <div className="flex items-center space-x-1.5 p-1 bg-slate-900 border border-slate-800 rounded-xl text-xs">
+              <button
+                onClick={() => setHistoryFilter('all')}
+                className={`px-3 py-1 rounded-lg font-semibold transition ${
+                  historyFilter === 'all' ? 'bg-slate-800 text-white' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                All ({history.length})
+              </button>
+              <button
+                onClick={() => setHistoryFilter('technical')}
+                className={`px-3 py-1 rounded-lg font-semibold transition ${
+                  historyFilter === 'technical' ? 'bg-brand-600/30 text-brand-300 border border-brand-500/30' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                Technical ({history.filter((i) => (i.interviewType || 'technical') === 'technical').length})
+              </button>
+              <button
+                onClick={() => setHistoryFilter('hr')}
+                className={`px-3 py-1 rounded-lg font-semibold transition ${
+                  historyFilter === 'hr' ? 'bg-emerald-600/30 text-emerald-300 border border-emerald-500/30' : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                HR ({history.filter((i) => i.interviewType === 'hr').length})
+              </button>
+            </div>
           </div>
 
           {loadingHistory ? (
             <div className="glass-panel p-8 rounded-2xl border border-slate-800 text-center text-xs text-slate-400">
               Loading your previous mock interviews...
             </div>
-          ) : history.length === 0 ? (
+          ) : filteredHistory.length === 0 ? (
             <div className="glass-panel p-10 rounded-2xl border border-slate-800 text-center space-y-3">
               <Video className="w-10 h-10 text-slate-600 mx-auto" />
-              <h3 className="text-sm font-semibold text-slate-300">No mock interviews taken yet</h3>
+              <h3 className="text-sm font-semibold text-slate-300">No {historyFilter !== 'all' ? historyFilter.toUpperCase() : ''} mock interviews taken yet</h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                Ready to prepare? Click <strong>Take Mock Interview</strong> above to begin your first 20-minute AI technical mock.
+                Ready to prepare? Click <strong>Take {isHrLanding ? 'HR' : 'Technical'} Mock Interview</strong> above to begin your 20-minute session.
               </p>
             </div>
           ) : (
             <div className="space-y-3">
-              {history.map((item) => {
+              {filteredHistory.map((item) => {
+                const isHrItem = item.interviewType === 'hr';
                 const dateStr = item.createdAt
                   ? new Date(item.createdAt).toLocaleDateString('en-US', {
                       month: 'short',
@@ -993,14 +1117,27 @@ const TechnicalInterviewView = ({ companyName, targetRole, onBackToDashboard }) 
                     className="glass-panel p-5 rounded-2xl border border-slate-800 hover:border-slate-700/80 transition flex items-center justify-between"
                   >
                     <div className="flex items-center space-x-4">
-                      <div className="w-10 h-10 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-center text-brand-400 font-extrabold text-sm">
+                      <div className={`w-10 h-10 rounded-xl border flex items-center justify-center font-extrabold text-sm ${
+                        isHrItem
+                          ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-400'
+                          : 'bg-brand-950/40 border-brand-500/30 text-brand-400'
+                      }`}>
                         #{item.attemptNumber}
                       </div>
 
                       <div>
-                        <h4 className="text-sm font-bold text-white">
-                          Mock Interview #{item.attemptNumber}
-                        </h4>
+                        <div className="flex items-center space-x-2">
+                          <h4 className="text-sm font-bold text-white">
+                            {isHrItem ? 'HR Mock Interview' : 'Technical Mock Interview'} #{item.attemptNumber}
+                          </h4>
+                          <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${
+                            isHrItem
+                              ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                              : 'bg-brand-500/15 text-brand-300 border-brand-500/30'
+                          }`}>
+                            {isHrItem ? 'HR' : 'Technical'}
+                          </span>
+                        </div>
                         <div className="flex items-center space-x-3 text-xs text-slate-400 mt-0.5">
                           <span>Date: {dateStr}</span>
                           <span>•</span>
@@ -1023,7 +1160,7 @@ const TechnicalInterviewView = ({ companyName, targetRole, onBackToDashboard }) 
                         disabled={loadingEvaluation}
                         className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition flex items-center space-x-1"
                       >
-                        <span>View Evaluation</span>
+                        <span>View Report</span>
                         <ChevronRight className="w-3.5 h-3.5 text-slate-400" />
                       </button>
                     </div>
@@ -1578,31 +1715,48 @@ const TechnicalInterviewView = ({ companyName, targetRole, onBackToDashboard }) 
   // VIEW 5: EVALUATION REPORT PAGE
   // =========================================================================
   if (viewState === 'evaluation' && evaluationData) {
+    const isHrReport = currentSession?.interviewType === 'hr' || selectedInterviewType === 'hr';
     const overallScore = evaluationData.overallScore ?? 75;
-    const metrics = [
-      { label: 'Technical Knowledge', value: evaluationData.technicalKnowledge ?? 80, weight: '25%' },
-      { label: 'Practical Understanding', value: evaluationData.practicalUnderstanding ?? evaluationData.technicalKnowledge ?? 75, weight: '20%' },
-      { label: 'Project Understanding', value: evaluationData.projectUnderstanding ?? 85, weight: '20%' },
-      { label: 'Problem Solving', value: evaluationData.problemSolving ?? 70, weight: '15%' },
-      { label: 'Depth of Understanding', value: evaluationData.depthOfUnderstanding ?? evaluationData.depth ?? 75, weight: '10%' },
-      { label: 'Answer Relevance', value: evaluationData.answerRelevance ?? 80, weight: '5%' },
-      { label: 'Communication / Clarity', value: evaluationData.communication ?? 78, weight: '5%' },
-    ];
 
-    // Normalize strengths and weaknesses (supporting both { skill, evidence } objects and legacy strings)
+    const metrics = isHrReport
+      ? [
+          { label: 'Communication & Clarity', value: evaluationData.communicationClarity ?? 75, weight: '15%' },
+          { label: 'Confidence & Composure', value: evaluationData.confidenceComposure ?? 75, weight: '10%' },
+          { label: 'Teamwork & Collaboration', value: evaluationData.teamwork ?? 75, weight: '10%' },
+          { label: 'Leadership & Initiative', value: evaluationData.leadership ?? 75, weight: '10%' },
+          { label: 'Problem Solving', value: evaluationData.problemSolving ?? 75, weight: '10%' },
+          { label: 'Adaptability & Resilience', value: evaluationData.adaptability ?? 75, weight: '10%' },
+          { label: 'Role & Company Motivation', value: evaluationData.roleMotivation ?? 75, weight: '10%' },
+          { label: 'Behavioral Reasoning (STAR)', value: evaluationData.behavioralReasoning ?? 75, weight: '10%' },
+          { label: 'Professionalism & Awareness', value: evaluationData.professionalism ?? 75, weight: '10%' },
+          { label: 'Answer Relevance', value: evaluationData.answerRelevance ?? 75, weight: '5%' },
+        ]
+      : [
+          { label: 'Technical Knowledge', value: evaluationData.technicalKnowledge ?? 80, weight: '25%' },
+          { label: 'Practical Understanding', value: evaluationData.practicalUnderstanding ?? evaluationData.technicalKnowledge ?? 75, weight: '20%' },
+          { label: 'Project Understanding', value: evaluationData.projectUnderstanding ?? 85, weight: '20%' },
+          { label: 'Problem Solving', value: evaluationData.problemSolving ?? 70, weight: '15%' },
+          { label: 'Depth of Understanding', value: evaluationData.depthOfUnderstanding ?? evaluationData.depth ?? 75, weight: '10%' },
+          { label: 'Answer Relevance', value: evaluationData.answerRelevance ?? 80, weight: '5%' },
+          { label: 'Communication / Clarity', value: evaluationData.communication ?? 78, weight: '5%' },
+        ];
+
+    // Normalize strengths and weaknesses
     const strengthsList = Array.isArray(evaluationData.strengths) && evaluationData.strengths.length > 0
       ? evaluationData.strengths
-      : (evaluationData.strongAreas || []).map((s) => ({ skill: s, evidence: 'Demonstrated solid technical understanding in this topic.' }));
+      : (evaluationData.strongAreas || []).map((s) => ({ skill: s, evidence: 'Demonstrated solid understanding in this topic.' }));
 
     const weaknessesList = Array.isArray(evaluationData.weaknesses) && evaluationData.weaknesses.length > 0
       ? evaluationData.weaknesses
-      : (evaluationData.needsImprovement || []).map((w) => ({ skill: w, evidence: 'Candidate showed uncertainty or incomplete technical depth.' }));
+      : (evaluationData.needsImprovement || []).map((w) => ({ skill: w, evidence: 'Candidate showed uncertainty or incomplete depth.' }));
 
     const notAssessedList = Array.isArray(evaluationData.notAssessed) ? evaluationData.notAssessed : [];
 
     const recommendationsList = Array.isArray(evaluationData.recommendations) && evaluationData.recommendations.length > 0
       ? evaluationData.recommendations
       : (evaluationData.whatToImprove || []).map((item) => ({ topic: 'Area to Refine', reason: item }));
+
+    const recommendedNextAreas = Array.isArray(evaluationData.recommendedNextAreas) ? evaluationData.recommendedNextAreas : [];
 
     const qEvals = Array.isArray(evaluationData.questionEvaluations) ? evaluationData.questionEvaluations : [];
 
@@ -1611,9 +1765,16 @@ const TechnicalInterviewView = ({ companyName, targetRole, onBackToDashboard }) 
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-extrabold text-white tracking-tight">
-              Technical Interview Evaluation
-            </h1>
+            <div className="flex items-center space-x-2">
+              <h1 className="text-2xl font-extrabold text-white tracking-tight">
+                {isHrReport ? 'HR Interview Evaluation Report' : 'Technical Interview Evaluation'}
+              </h1>
+              <span className={`px-2.5 py-0.5 rounded-md text-xs font-bold border ${
+                isHrReport ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-brand-500/15 text-brand-300 border-brand-500/30'
+              }`}>
+                {isHrReport ? 'HR Assessment' : 'Technical Assessment'}
+              </span>
+            </div>
             <p className="text-xs text-slate-400 mt-1">
               Mock #{currentSession?.attemptNumber || 1} • {companyName || 'Target Company'} • Grounded in Your Resume
             </p>
@@ -1623,42 +1784,87 @@ const TechnicalInterviewView = ({ companyName, targetRole, onBackToDashboard }) 
             onClick={() => setViewState('landing')}
             className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl text-xs font-semibold transition"
           >
-            ← Back to Technical Interview
+            ← Back to Mock Interview
           </button>
         </div>
 
         {/* Overall Score Card */}
-        <div className="glass-panel p-8 rounded-3xl border border-slate-800 bg-gradient-to-br from-slate-900/90 to-slate-950 flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl">
+        <div className={`glass-panel p-8 rounded-3xl border border-slate-800 flex flex-col md:flex-row items-center justify-between gap-6 shadow-2xl bg-gradient-to-br ${
+          isHrReport ? 'from-slate-900/90 via-slate-950 to-emerald-950/20' : 'from-slate-900/90 to-slate-950'
+        }`}>
           <div className="space-y-2 text-center md:text-left">
-            <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-brand-500/10 border border-brand-500/20 text-brand-400 text-xs font-bold uppercase tracking-wider">
+            <div className={`inline-flex items-center space-x-2 px-3 py-1 rounded-full border text-xs font-bold uppercase tracking-wider ${
+              isHrReport ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-brand-500/10 border-brand-500/20 text-brand-400'
+            }`}>
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Evidence-Based Score</span>
+              <span>{isHrReport ? 'Overall HR Evaluation Score' : 'Evidence-Based Score'}</span>
             </div>
             <h2 className="text-4xl font-extrabold text-white">
               {overallScore} <span className="text-slate-500 text-2xl font-normal">/ 100</span>
             </h2>
             <p className="text-xs text-slate-400 max-w-md leading-relaxed">
               {overallScore >= 75
-                ? 'Strong performance! You demonstrated clear technical depth, accurate reasoning, and solid project ownership based on your resume.'
+                ? isHrReport
+                  ? 'Outstanding behavioral readiness! You communicated effectively, provided clear STAR-structured examples, and aligned with company expectations.'
+                  : 'Strong performance! You demonstrated clear technical depth, accurate reasoning, and solid project ownership based on your resume.'
+                : isHrReport
+                ? 'Good effort! Review your communication observations and recommended preparation areas below to structure your answers using the STAR method.'
                 : 'Good attempt. Review the evidence-backed strengths and improvement areas below to refine your technical depth before your target drive.'}
             </p>
           </div>
 
           <button
-            onClick={handleTakeMockInterview}
-            className="px-6 py-3 bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-brand-500/20 transition whitespace-nowrap"
+            onClick={() => handleTakeMockInterview(isHrReport ? 'hr' : 'technical')}
+            className={`px-6 py-3 text-white rounded-xl text-xs font-bold shadow-lg transition whitespace-nowrap ${
+              isHrReport
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 shadow-emerald-500/20'
+                : 'bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 shadow-brand-500/20'
+            }`}
           >
-            Take Another Mock Interview
+            Take Another {isHrReport ? 'HR' : 'Technical'} Interview
           </button>
         </div>
 
-        {/* 7-Dimension Performance Breakdown */}
+        {/* HR Communication & Behavioral Observations Banner */}
+        {isHrReport && evaluationData.communicationObservations && (
+          <div className="glass-panel p-6 rounded-3xl border border-emerald-500/20 bg-emerald-500/5 space-y-2">
+            <h3 className="text-xs font-bold text-emerald-400 uppercase tracking-wider flex items-center space-x-2">
+              <Bot className="w-4 h-4 text-emerald-400" />
+              <span>Communication & Behavioral Observations</span>
+            </h3>
+            <p className="text-xs text-slate-200 leading-relaxed font-medium">
+              "{evaluationData.communicationObservations}"
+            </p>
+          </div>
+        )}
+
+        {/* Recommended Preparation Topics */}
+        {isHrReport && recommendedNextAreas.length > 0 && (
+          <div className="glass-panel p-6 rounded-3xl border border-slate-800 space-y-3 bg-slate-950/60">
+            <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
+              <TrendingUp className="w-4 h-4 text-brand-400" />
+              <span>Recommended Next Preparation Topics</span>
+            </h3>
+            <div className="flex flex-wrap gap-2 pt-1">
+              {recommendedNextAreas.map((topic, idx) => (
+                <span
+                  key={idx}
+                  className="px-3.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-brand-300 text-xs font-semibold"
+                >
+                  🎯 {topic}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Performance Breakdown Rubric */}
         <div className="glass-panel p-6 rounded-3xl border border-slate-800 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">
-              7-Dimension Performance Rubric
+              {isHrReport ? '10-Category HR Assessment Rubric' : '7-Dimension Performance Rubric'}
             </h3>
-            <span className="text-[11px] text-slate-500">Weighted Assessment</span>
+            <span className="text-[11px] text-slate-500">Weighted Evaluation (100% Total)</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

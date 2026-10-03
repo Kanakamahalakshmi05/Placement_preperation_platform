@@ -95,6 +95,12 @@ const technicalInterviewSchema = new mongoose.Schema(
       type: String,
       default: 'Target Company',
     },
+    interviewType: {
+      type: String,
+      enum: ['technical', 'hr'],
+      default: 'technical',
+      index: true,
+    },
     attemptNumber: {
       type: Number,
       required: true,
@@ -139,6 +145,7 @@ const technicalInterviewSchema = new mongoose.Schema(
     questions: [interviewQuestionSchema],
     evaluation: {
       overallScore: { type: Number, default: 0 },
+      // Technical criteria
       technicalKnowledge: { type: Number, default: 0 },
       practicalUnderstanding: { type: Number, default: 0 },
       projectUnderstanding: { type: Number, default: 0 },
@@ -147,6 +154,17 @@ const technicalInterviewSchema = new mongoose.Schema(
       depth: { type: Number, default: 0 }, // backwards compatibility
       answerRelevance: { type: Number, default: 0 },
       communication: { type: Number, default: 0 },
+      // HR criteria
+      communicationClarity: { type: Number, default: 0 },
+      confidenceComposure: { type: Number, default: 0 },
+      teamwork: { type: Number, default: 0 },
+      leadership: { type: Number, default: 0 },
+      adaptability: { type: Number, default: 0 },
+      roleMotivation: { type: Number, default: 0 },
+      behavioralReasoning: { type: Number, default: 0 },
+      professionalism: { type: Number, default: 0 },
+      communicationObservations: { type: String, default: '' },
+      recommendedNextAreas: { type: [String], default: [] },
       strengths: [
         {
           skill: { type: String },

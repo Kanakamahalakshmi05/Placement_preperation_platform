@@ -12,6 +12,10 @@ import {
   Award,
   TrendingUp,
   X,
+  Target,
+  Flame,
+  Check,
+  Compass,
 } from 'lucide-react';
 import { fetchMockQuiz, submitMockQuiz, triggerAIAnalysis } from '../../services/api';
 
@@ -33,28 +37,70 @@ const PreparationView = ({
   const [submittingQuiz, setSubmittingQuiz] = useState(false);
   const [quizResult, setQuizResult] = useState(null);
   const [error, setError] = useState(null);
+  const [refreshingAnalysis, setRefreshingAnalysis] = useState(false);
 
   // Extract skills & topics from actual Resume + JD AI analysis (strictly from API)
-  const matchedSkills =
-    aiAnalysisData?.matchedSkills || aiAnalysisData?.strongSkills || [];
-  const skillsToImprove =
-    aiAnalysisData?.skillsToImprove || aiAnalysisData?.missingSkills || [];
-  const importantTopics =
-    aiAnalysisData?.importantTopics || aiAnalysisData?.recommendedTopics || [];
+  const rawMatched = aiAnalysisData?.matchedSkillsDetailed && aiAnalysisData.matchedSkillsDetailed.length > 0
+    ? aiAnalysisData.matchedSkillsDetailed
+    : aiAnalysisData?.matchedSkills || aiAnalysisData?.strongSkills || [];
+
+  const matchedSkills = rawMatched.map((item) =>
+    typeof item === 'object' && item !== null
+      ? item
+      : { skill: item, strength: 'strong', evidence: 'Verified proficiency from your resume.' }
+  );
+
+  const rawMissing = aiAnalysisData?.missingSkillsDetailed && aiAnalysisData.missingSkillsDetailed.length > 0
+    ? aiAnalysisData.missingSkillsDetailed
+    : aiAnalysisData?.missingSkills || aiAnalysisData?.skillsToImprove || [];
+
+  const missingSkills = rawMissing.map((item) =>
+    typeof item === 'object' && item !== null
+      ? item
+      : { skill: item, importance: 'high', reason: 'Required by company JD; prepare for interview questions.' }
+  );
+
+  const rawFocusAreas = aiAnalysisData?.areasToFocusDetailed && aiAnalysisData.areasToFocusDetailed.length > 0
+    ? aiAnalysisData.areasToFocusDetailed
+    : aiAnalysisData?.areasToFocus || aiAnalysisData?.importantTopics || aiAnalysisData?.recommendedTopics || [];
+
+  const areasToFocus = rawFocusAreas.map((item) => {
+    if (typeof item === 'object' && item !== null) {
+      return item;
+    }
+    const isHigh = typeof item === 'string' && item.includes('— HIGH');
+    const cleanTopic = (item || '').replace(/\s*—\s*(HIGH|MEDIUM|LOW)/i, '');
+    return {
+      topic: cleanTopic,
+      priority: isHigh ? 'HIGH' : 'MEDIUM',
+      whyFocus: 'Key technical requirement from the company job description.',
+      actionPlan: 'Review core concepts, practice common interview questions, and study practical implementation patterns.',
+    };
+  });
+
+  // Re-run AI analysis on demand
+  const handleReanalyze = async () => {
+    setRefreshingAnalysis(true);
+    setError(null);
+    try {
+      const res = await triggerAIAnalysis();
+      if (res.success && onRefreshDashboard) {
+        await onRefreshDashboard();
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to re-run AI analysis.');
+    } finally {
+      setRefreshingAnalysis(false);
+    }
+  };
 
   // Automatically refresh AI analysis if skills are not yet populated
   useEffect(() => {
     if (
-      (!aiAnalysisData || (!matchedSkills.length && !skillsToImprove.length)) &&
+      (!aiAnalysisData || (!matchedSkills.length && !missingSkills.length)) &&
       onRefreshDashboard
     ) {
-      triggerAIAnalysis()
-        .then((res) => {
-          if (res.success && onRefreshDashboard) {
-            onRefreshDashboard();
-          }
-        })
-        .catch(() => {});
+      handleReanalyze();
     }
   }, [aiAnalysisData]);
 
@@ -410,13 +456,29 @@ const PreparationView = ({
   // VIEW 1: PREPARATION OVERVIEW (FINAL UI)
   // =========================================================================
   return (
-    <div className="max-w-3xl mx-auto py-2 space-y-8">
+    <div className="max-w-4xl mx-auto py-2 space-y-8">
       {/* Top Header */}
-      <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight">Preparation</h1>
-        <p className="text-xs text-slate-400 mt-1.5">
-          Based on your resume and the company job description, here's what you should prepare.
-        </p>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-5">
+        <div>
+          <div className="flex items-center space-x-2">
+            <h1 className="text-2xl font-bold text-white tracking-tight">Skills & Interview Preparation</h1>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-brand-500/10 text-brand-400 border border-brand-500/20">
+              AI Analysis
+            </span>
+          </div>
+          <p className="text-xs text-slate-400 mt-1">
+            Grounded in your resume and the requirements for <strong className="text-slate-200">{targetRole}</strong> at <strong className="text-slate-200">{companyName}</strong>.
+          </p>
+        </div>
+
+        <button
+          onClick={handleReanalyze}
+          disabled={refreshingAnalysis}
+          className="px-4 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 hover:border-slate-500 text-slate-300 text-xs font-semibold transition flex items-center space-x-2 shrink-0 disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${refreshingAnalysis ? 'animate-spin text-brand-400' : 'text-slate-400'}`} />
+          <span>{refreshingAnalysis ? 'Re-analyzing...' : 'Re-run AI Analysis'}</span>
+        </button>
       </div>
 
       {error && (
@@ -425,130 +487,248 @@ const PreparationView = ({
         </div>
       )}
 
-      {/* =========================================================================
-          SECTION 1 — SKILL ANALYSIS
-          ========================================================================= */}
-      <div className="space-y-3">
-        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-          Skill Analysis
-        </h3>
+      {/* Summary Score/Metrics Bar */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+        <div className="glass-panel p-4 rounded-2xl border border-emerald-500/25 bg-emerald-500/5 flex items-center justify-between shadow-md">
+          <div className="space-y-0.5">
+            <span className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider">Matched Skills</span>
+            <p className="text-xs text-slate-300 font-medium">Found in Resume & JD</p>
+          </div>
+          <span className="text-2xl font-extrabold text-emerald-300">{matchedSkills.length}</span>
+        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="glass-panel p-4 rounded-2xl border border-rose-500/25 bg-rose-500/5 flex items-center justify-between shadow-md">
+          <div className="space-y-0.5">
+            <span className="text-[11px] font-bold text-rose-400 uppercase tracking-wider">Missing Skills</span>
+            <p className="text-xs text-slate-300 font-medium">Required in JD / Needs Prep</p>
+          </div>
+          <span className="text-2xl font-extrabold text-rose-300">{missingSkills.length}</span>
+        </div>
+
+        <div className="glass-panel p-4 rounded-2xl border border-brand-500/25 bg-brand-500/5 flex items-center justify-between shadow-md">
+          <div className="space-y-0.5">
+            <span className="text-[11px] font-bold text-brand-400 uppercase tracking-wider">Areas to Focus</span>
+            <p className="text-xs text-slate-300 font-medium">Prioritized Focus Modules</p>
+          </div>
+          <span className="text-2xl font-extrabold text-brand-300">{areasToFocus.length}</span>
+        </div>
+      </div>
+
+      {/* =========================================================================
+          SECTION 1 — SKILLS ANALYSIS (MATCHED VS MISSING)
+          ========================================================================= */}
+      <div className="space-y-4">
+        <div>
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
+            1. Skills Analysis (Resume vs JD)
+          </h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Direct comparison between what the company requires in the JD and your resume evidence.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {/* Card 1: ✓ MATCHED SKILLS */}
-          <div className="glass-panel p-6 rounded-2xl border border-emerald-500/20 bg-slate-900/60 shadow-lg space-y-4">
-            <div className="flex items-center space-x-2 text-emerald-400 text-xs font-bold uppercase tracking-wider pb-2 border-b border-slate-800">
-              <CheckCircle2 className="w-4 h-4" />
-              <span>✓ MATCHED SKILLS</span>
+          <div className="glass-panel p-6 rounded-3xl border border-emerald-500/30 bg-slate-950/70 shadow-xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2 text-emerald-400 text-xs font-bold uppercase tracking-wider">
+                <CheckCircle2 className="w-4 h-4" />
+                <span>Matched Skills (Resume + JD)</span>
+              </div>
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                {matchedSkills.length} Verified
+              </span>
             </div>
 
             {matchedSkills.length > 0 ? (
-              <div className="space-y-3 text-sm font-semibold text-white">
+              <div className="space-y-3.5">
                 {matchedSkills.map((item, i) => {
                   const label = getSkillLabel(item);
                   const evidence = typeof item === 'object' ? item.evidence : null;
+                  const jdContext = typeof item === 'object' ? item.jdContext : null;
                   return (
-                    <div key={i} className="flex flex-col space-y-0.5 text-slate-100">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-emerald-400 text-xs">✓</span>
-                        <span>{label}</span>
-                      </div>
-                      {evidence && evidence.length > 5 && (
-                        <span className="text-[11px] text-slate-400 ml-4 font-normal italic line-clamp-1">
-                          {evidence}
+                    <div
+                      key={i}
+                      className="p-3.5 rounded-2xl bg-emerald-500/5 border border-emerald-500/15 space-y-1.5 transition hover:border-emerald-500/30"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-xs font-bold">
+                            ✓
+                          </span>
+                          <h4 className="text-xs font-bold text-emerald-300">{label}</h4>
+                        </div>
+                        <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400">
+                          Matched
                         </span>
+                      </div>
+
+                      {evidence && (
+                        <p className="text-[11px] text-slate-300 pl-7 leading-relaxed">
+                          <span className="text-slate-400 font-semibold">Resume Evidence: </span>
+                          {evidence}
+                        </p>
+                      )}
+
+                      {jdContext && (
+                        <p className="text-[10px] text-slate-400 pl-7 italic">
+                          <span className="text-slate-500 font-medium">JD Requirement: </span>
+                          {jdContext}
+                        </p>
                       )}
                     </div>
                   );
                 })}
               </div>
             ) : (
-              <p className="text-xs text-slate-400 italic">No direct matches detected in JD</p>
+              <p className="text-xs text-slate-400 italic p-3">No direct matches identified for this JD.</p>
             )}
           </div>
 
-          {/* Card 2: ⚠ SKILLS TO IMPROVE */}
-          <div className="glass-panel p-6 rounded-2xl border border-amber-500/20 bg-slate-900/60 shadow-lg space-y-4">
-            <div className="flex items-center space-x-2 text-amber-400 text-xs font-bold uppercase tracking-wider pb-2 border-b border-slate-800">
-              <AlertTriangle className="w-4 h-4" />
-              <span>⚠ SKILLS TO IMPROVE</span>
+          {/* Card 2: ⚠ MISSING SKILLS */}
+          <div className="glass-panel p-6 rounded-3xl border border-rose-500/30 bg-slate-950/70 shadow-xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2 text-rose-400 text-xs font-bold uppercase tracking-wider">
+                <AlertTriangle className="w-4 h-4" />
+                <span>Missing Skills (Required by JD)</span>
+              </div>
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30">
+                {missingSkills.length} To Prepare
+              </span>
             </div>
 
-            {skillsToImprove.length > 0 ? (
-              <div className="space-y-3 text-sm font-semibold text-white">
-                {skillsToImprove.map((item, i) => {
+            {missingSkills.length > 0 ? (
+              <div className="space-y-3.5">
+                {missingSkills.map((item, i) => {
                   const label = getSkillLabel(item);
                   const reason = typeof item === 'object' ? item.reason : null;
-                  const isHigh = typeof item === 'object' && item.importance === 'high';
+                  const isHigh = typeof item === 'object' && (item.importance === 'high' || item.importance === 'HIGH');
                   return (
-                    <div key={i} className="flex flex-col space-y-0.5 text-slate-100">
+                    <div
+                      key={i}
+                      className="p-3.5 rounded-2xl bg-rose-500/5 border border-rose-500/15 space-y-1.5 transition hover:border-rose-500/30"
+                    >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2">
-                          <span className="text-amber-400 text-xs">⚠</span>
-                          <span>{label}</span>
-                        </div>
-                        {isHigh && (
-                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
-                            HIGH
+                          <span className="w-5 h-5 rounded-full bg-rose-500/20 text-rose-400 flex items-center justify-center text-xs font-bold">
+                            !
                           </span>
-                        )}
-                      </div>
-                      {reason && (
-                        <span className="text-[11px] text-slate-400 ml-4 font-normal line-clamp-1">
-                          {reason}
+                          <h4 className="text-xs font-bold text-rose-300">{label}</h4>
+                        </div>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                            isHigh
+                              ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                              : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                          }`}
+                        >
+                          {isHigh ? 'HIGH PRIORITY' : 'MEDIUM'}
                         </span>
+                      </div>
+
+                      {reason && (
+                        <p className="text-[11px] text-slate-300 pl-7 leading-relaxed">
+                          <span className="text-slate-400 font-semibold">Why Required: </span>
+                          {reason}
+                        </p>
                       )}
                     </div>
                   );
                 })}
               </div>
             ) : (
-              <p className="text-xs text-emerald-400 font-medium">All required core skills matched!</p>
+              <div className="p-6 text-center space-y-2">
+                <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
+                <p className="text-xs text-emerald-300 font-semibold">All core skills from the JD are matched in your resume!</p>
+              </div>
             )}
           </div>
         </div>
       </div>
 
       {/* =========================================================================
-          SECTION 2 — IMPORTANT TOPICS TO PREPARE
+          SECTION 2 — AREAS TO FOCUS SEPARATELY
           ========================================================================= */}
-      <div className="space-y-3">
-        <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-          Important Topics
-        </h3>
+      <div className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+          <div>
+            <h3 className="text-xs font-bold text-brand-400 uppercase tracking-wider flex items-center space-x-2">
+              <Compass className="w-4 h-4 text-brand-400" />
+              <span>2. Areas to Focus Separately (Targeted Preparation Roadmap)</span>
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Specific, prioritized focus modules designed to bridge your skill gaps for {companyName}.
+            </p>
+          </div>
+        </div>
 
-        <div className="glass-panel p-5 rounded-2xl border border-slate-800/90 shadow-lg">
-          {importantTopics.length > 0 ? (
-            <ol className="space-y-2.5">
-              {importantTopics.map((item, i) => {
-                const rawLabel = getTopicLabel(item);
-                const priority = getTopicPriority(item);
-                const cleanLabel = (rawLabel || '').replace(/\s*—\s*(HIGH|MEDIUM|LOW)/i, '');
+        <div className="glass-panel p-6 rounded-3xl border border-slate-800/90 shadow-xl space-y-4 bg-slate-950/60">
+          {areasToFocus.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {areasToFocus.map((item, i) => {
+                const topicTitle = getTopicLabel(item);
+                const priority = getTopicPriority(item) || (typeof item === 'object' ? item.priority : 'MEDIUM');
+                const whyFocus = typeof item === 'object' ? item.whyFocus : null;
+                const actionPlan = typeof item === 'object' ? item.actionPlan : null;
+                const skillTag = typeof item === 'object' ? item.skill : null;
+                const isHigh = priority === 'HIGH';
+
                 return (
-                  <li
+                  <div
                     key={i}
-                    className="flex items-center justify-between p-3 rounded-xl bg-slate-900/60 border border-slate-800/80 text-xs text-slate-200 hover:border-slate-700 transition"
+                    className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2.5 transition hover:border-brand-500/40"
                   >
-                    <div className="flex items-center space-x-3 min-w-0 pr-2">
-                      <span className="w-6 h-6 rounded-full bg-brand-500/15 text-brand-400 font-bold flex items-center justify-center text-xs flex-shrink-0">
-                        {i + 1}
-                      </span>
-                      <span className="font-medium truncate">{cleanLabel}</span>
-                    </div>
-                    {priority && (
+                    {/* Topic Header */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-start space-x-2.5">
+                        <span className="w-6 h-6 rounded-xl bg-brand-500/15 text-brand-400 font-bold flex items-center justify-center text-xs shrink-0 mt-0.5">
+                          {i + 1}
+                        </span>
+                        <div>
+                          <h4 className="text-xs font-bold text-white leading-snug">{topicTitle}</h4>
+                          {skillTag && (
+                            <span className="inline-block text-[10px] font-semibold text-slate-400 mt-0.5">
+                              Skill: <strong className="text-slate-200">{skillTag}</strong>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
                       <span
-                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full border flex-shrink-0 ${
-                          priority === 'HIGH'
+                        className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full border shrink-0 ${
+                          isHigh
                             ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
                             : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
                         }`}
                       >
-                        {priority}
+                        {isHigh ? 'HIGH PRIORITY' : 'MEDIUM'}
                       </span>
+                    </div>
+
+                    {/* Why to Focus */}
+                    {whyFocus && (
+                      <p className="text-[11px] text-slate-300 pl-8 leading-relaxed">
+                        <span className="text-slate-400 font-semibold">Why Focus: </span>
+                        {whyFocus}
+                      </p>
                     )}
-                  </li>
+
+                    {/* Action Plan */}
+                    {actionPlan && (
+                      <div className="ml-8 p-2.5 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] text-slate-300 space-y-1">
+                        <div className="flex items-center space-x-1.5 text-brand-300 font-bold text-[10px] uppercase tracking-wider">
+                          <Zap className="w-3 h-3 text-brand-400" />
+                          <span>Preparation Strategy:</span>
+                        </div>
+                        <p className="text-[11px] text-slate-300 leading-relaxed font-normal">
+                          {actionPlan}
+                        </p>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
-            </ol>
+            </div>
           ) : (
             <p className="text-xs text-slate-400">
               Review your core engineering fundamentals and requirements for {targetRole}.

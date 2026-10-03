@@ -10,6 +10,7 @@ import {
   triggerAIAnalysis,
   startPreparing,
   setReadyForRound1,
+  fetchInterviewHistory,
 } from '../services/api';
 import {
   LayoutDashboard,
@@ -22,6 +23,7 @@ import {
   TrendingUp,
   LogOut,
   User as UserIcon,
+  UserCheck,
   Check,
   ArrowRight,
   Shield,
@@ -32,6 +34,8 @@ import {
   AlertCircle,
   Clock,
   Flame,
+  Award,
+  Target,
 } from 'lucide-react';
 
 const DashboardPage = () => {
@@ -41,6 +45,8 @@ const DashboardPage = () => {
   const [loadingDashboard, setLoadingDashboard] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [gateNotification, setGateNotification] = useState(null);
+  const [techStats, setTechStats] = useState({ attempts: 0, latestScore: null, weakAreas: [] });
+  const [hrStats, setHrStats] = useState({ attempts: 0, latestScore: null, weakAreas: [] });
 
   const loadDashboard = async () => {
     setLoadingDashboard(true);
@@ -48,6 +54,28 @@ const DashboardPage = () => {
       const res = await fetchStudentDashboard();
       if (res.success) {
         setDashboardData(res.data);
+      }
+      const [techRes, hrRes] = await Promise.all([
+        fetchInterviewHistory('technical').catch(() => null),
+        fetchInterviewHistory('hr').catch(() => null),
+      ]);
+      if (techRes?.success && techRes.data) {
+        const attempts = techRes.data.length;
+        const latest = techRes.data[0];
+        setTechStats({
+          attempts,
+          latestScore: latest?.overallScore ?? latest?.evaluation?.overallScore ?? latest?.evaluation?.score ?? latest?.score ?? null,
+          weakAreas: latest?.evaluation?.weaknesses || latest?.evaluation?.keyWeaknesses || [],
+        });
+      }
+      if (hrRes?.success && hrRes.data) {
+        const attempts = hrRes.data.length;
+        const latest = hrRes.data[0];
+        setHrStats({
+          attempts,
+          latestScore: latest?.overallScore ?? latest?.evaluation?.overallScore ?? latest?.evaluation?.score ?? latest?.score ?? null,
+          weakAreas: latest?.evaluation?.weaknesses || latest?.evaluation?.keyWeaknesses || [],
+        });
       }
     } catch (err) {
       console.warn('Dashboard fetch error:', err.message);
@@ -75,15 +103,14 @@ const DashboardPage = () => {
   const handleNavClick = (tabId) => {
     setGateNotification(null);
 
-    // Rule 1: Resume must be added first
-    if (!hasResume && tabId !== 'dashboard' && tabId !== 'resume' && tabId !== 'admin') {
-      setGateNotification('Resume must be uploaded first before proceeding.');
+    // Preparation requires resume & target job
+    if (!hasResume && tabId === 'preparation') {
+      setGateNotification('Resume must be uploaded first before proceeding to preparation.');
       return;
     }
 
-    // Rule 2: Target job must be added before preparation or technical interview
-    if (!hasTargetJob && (tabId === 'preparation' || tabId === 'technical-interview')) {
-      setGateNotification('Target job must be added before proceeding to preparation or technical interviews.');
+    if (!hasTargetJob && tabId === 'preparation') {
+      setGateNotification('Target job must be added before proceeding to preparation.');
       return;
     }
 
@@ -136,13 +163,14 @@ const DashboardPage = () => {
     }
   };
 
-  // Student Navigation menu items: Dashboard, Resume, Target Job, Preparation, Technical Interview
+  // Student Navigation menu items: Dashboard, Resume, Target Job, Preparation, Technical Interview, HR Mock Interview
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, locked: false },
     { id: 'resume', label: 'Resume', icon: FileText, locked: false },
     { id: 'target-job', label: 'Target Job', icon: Briefcase, locked: !hasResume },
     { id: 'preparation', label: 'Preparation', icon: BookOpen, locked: !hasResume || !hasTargetJob },
-    { id: 'technical-interview', label: 'Technical Interview', icon: Video, locked: !hasResume || !hasTargetJob },
+    { id: 'technical-interview', label: 'Technical Interview', icon: Video, locked: false },
+    { id: 'hr-interview', label: 'HR Mock Interview', icon: UserCheck, locked: false },
   ];
 
   return (
@@ -359,6 +387,98 @@ const DashboardPage = () => {
                         [ Add Target Job ]
                       </button>
                     )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Separate Technical vs HR Mock Interview Stats Section */}
+              <div className="pt-2">
+                <h2 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-3">
+                  Mock Interview Performance
+                </h2>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                  {/* Technical Interviews Card */}
+                  <div className="glass-panel p-5 rounded-2xl border border-slate-800/90 shadow-lg space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <Video className="w-4 h-4 text-brand-400" />
+                        <h3 className="text-xs font-bold text-white">Technical Interviews</h3>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-brand-500/10 text-brand-400 border border-brand-500/20">
+                        {techStats.attempts} {techStats.attempts === 1 ? 'Attempt' : 'Attempts'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-baseline space-x-2">
+                      <span className="text-2xl font-extrabold text-white">
+                        {techStats.latestScore !== null ? `${techStats.latestScore}%` : 'N/A'}
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-medium">Latest Score</span>
+                    </div>
+
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400 mb-1">Weak Technical Areas:</p>
+                      {techStats.weakAreas && techStats.weakAreas.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {techStats.weakAreas.slice(0, 3).map((w, idx) => (
+                            <span key={idx} className="px-2 py-0.5 rounded-md text-[10px] bg-rose-500/10 text-rose-300 border border-rose-500/20">
+                              {typeof w === 'object' ? (w.skill || w.topic || w.name || JSON.stringify(w)) : w}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-500 italic">No recorded technical weaknesses yet.</p>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => handleNavClick('technical-interview')}
+                      className="w-full py-2 rounded-xl bg-brand-600/20 hover:bg-brand-600/30 text-brand-300 border border-brand-500/30 hover:border-brand-500 text-xs font-semibold transition"
+                    >
+                      Start Technical Interview →
+                    </button>
+                  </div>
+
+                  {/* HR Interviews Card */}
+                  <div className="glass-panel p-5 rounded-2xl border border-slate-800/90 shadow-lg space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <UserCheck className="w-4 h-4 text-violet-400" />
+                        <h3 className="text-xs font-bold text-white">HR Behavioral Interviews</h3>
+                      </div>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-500/10 text-violet-400 border border-violet-500/20">
+                        {hrStats.attempts} {hrStats.attempts === 1 ? 'Attempt' : 'Attempts'}
+                      </span>
+                    </div>
+
+                    <div className="flex items-baseline space-x-2">
+                      <span className="text-2xl font-extrabold text-white">
+                        {hrStats.latestScore !== null ? `${hrStats.latestScore}%` : 'N/A'}
+                      </span>
+                      <span className="text-[11px] text-slate-400 font-medium">Latest Score</span>
+                    </div>
+
+                    <div>
+                      <p className="text-[11px] font-semibold text-slate-400 mb-1">Weak HR Areas:</p>
+                      {hrStats.weakAreas && hrStats.weakAreas.length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {hrStats.weakAreas.slice(0, 3).map((w, idx) => (
+                            <span key={idx} className="px-2 py-0.5 rounded-md text-[10px] bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                              {typeof w === 'object' ? (w.skill || w.topic || w.name || JSON.stringify(w)) : w}
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-slate-500 italic">No recorded HR weaknesses yet.</p>
+                      )}
+                    </div>
+
+                    <button
+                      onClick={() => handleNavClick('hr-interview')}
+                      className="w-full py-2 rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/30 hover:border-violet-500 text-xs font-semibold transition"
+                    >
+                      Start HR Mock Interview →
+                    </button>
                   </div>
                 </div>
               </div>
@@ -600,6 +720,17 @@ const DashboardPage = () => {
           {/* TAB: Technical Interview */}
           {activeNav === 'technical-interview' && (
             <TechnicalInterviewView
+              initialInterviewType="technical"
+              companyName={companyName}
+              targetRole={targetRoleText}
+              onBackToDashboard={() => setActiveNav('dashboard')}
+            />
+          )}
+
+          {/* TAB: HR Mock Interview */}
+          {activeNav === 'hr-interview' && (
+            <TechnicalInterviewView
+              initialInterviewType="hr"
               companyName={companyName}
               targetRole={targetRoleText}
               onBackToDashboard={() => setActiveNav('dashboard')}

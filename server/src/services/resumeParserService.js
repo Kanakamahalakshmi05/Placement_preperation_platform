@@ -372,40 +372,126 @@ const analyzeSkillGap = ({ resumeText = '', jdText = '', resumeSkills = [], jdSk
     }
   });
 
-  // 3. GENERATE DYNAMIC TOPICS DIRECTLY FROM JD REQUIREMENTS & SKILL GAPS
+  // 3. GENERATE DYNAMIC TOPICS & AREAS TO FOCUS DIRECTLY FROM JD REQUIREMENTS & SKILL GAPS
   const topicMap = {
-    React: 'React Component Architecture & State Management',
-    'Node.js': 'Node.js Event Loop, Streams & Middleware',
-    SQL: 'SQL Joins, Indexing & Query Optimization',
-    'REST APIs': 'RESTful API Design, Status Codes & Idempotency',
-    Docker: 'Docker Containerization, Multi-Stage Builds & Layers',
-    Kubernetes: 'Kubernetes Pod Architecture, Services & Scaling',
-    Go: 'Go Goroutines, Channels & Concurrency Patterns',
-    GCP: 'Google Cloud Platform Services & Architecture',
-    AWS: 'AWS Core Services (EC2, S3, IAM) & Serverless',
-    MongoDB: 'MongoDB Document Modeling, Indexing & Aggregation',
-    DSA: 'Data Structures and Algorithms (Arrays, Graphs, DP)',
-    'System Design': 'Distributed System Design & High Concurrency',
-    JavaScript: 'JavaScript Async/Await, Event Loop & Closures',
-    TypeScript: 'TypeScript Generics, Utility Types & Type Guards',
-    Python: 'Python Object-Oriented Patterns & Generators',
-    'Machine Learning': 'Machine Learning Algorithms & Model Validation',
-    Pandas: 'Pandas DataFrames, Vectorization & Data Cleaning',
-    NumPy: 'NumPy Array Manipulation & Matrix Operations',
-    'Model Evaluation': 'Model Evaluation Metrics (ROC-AUC, Precision, Recall)',
-    Microservices: 'Microservices Communication, Sagas & Resiliency',
+    React: {
+      topic: 'React Component Architecture & State Management',
+      whyFocus: 'Essential frontend requirement for interactive component lifecycles and state.',
+      actionPlan: 'Review hooks (useState, useEffect, useMemo), Context API, and component composition.',
+    },
+    'Node.js': {
+      topic: 'Node.js Event Loop, Streams & Middleware Architecture',
+      whyFocus: 'Core backend requirement in JD for high-throughput microservices.',
+      actionPlan: 'Study non-blocking I/O, event emitters, custom middleware, and async error handling.',
+    },
+    SQL: {
+      topic: 'SQL Joins, Indexing & Query Optimization',
+      whyFocus: 'Core database requirement in JD for transactional queries and schema design.',
+      actionPlan: 'Practice complex multi-table joins, subqueries, indexing strategies, and normalization.',
+    },
+    'REST APIs': {
+      topic: 'RESTful API Design, Status Codes & Idempotency',
+      whyFocus: 'Required for clean backend service contracts and frontend integration.',
+      actionPlan: 'Review HTTP verbs, pagination, status codes, authentication headers, and rate limiting.',
+    },
+    Docker: {
+      topic: 'Docker Containerization, Multi-Stage Builds & Layers',
+      whyFocus: 'Required by JD for standardized deployment and microservice isolation.',
+      actionPlan: 'Practice writing optimized Dockerfiles, multi-stage builds, and Docker Compose networking.',
+    },
+    Kubernetes: {
+      topic: 'Kubernetes Pod Architecture, Services & Scaling',
+      whyFocus: 'Required in JD for managing container orchestration and production deployments.',
+      actionPlan: 'Review Pods, Deployments, Services, ConfigMaps, and horizontal pod autoscaling.',
+    },
+    Go: {
+      topic: 'Go Goroutines, Channels & Concurrency Patterns',
+      whyFocus: 'Required in JD for high-performance concurrent backend microservices.',
+      actionPlan: 'Review concurrency sync primitives, channels, select statements, and error handling.',
+    },
+    GCP: {
+      topic: 'Google Cloud Platform Services & Serverless Architecture',
+      whyFocus: 'Target cloud infrastructure specified in company job requirements.',
+      actionPlan: 'Review Cloud Run, Cloud Functions, Pub/Sub, and IAM permissions.',
+    },
+    AWS: {
+      topic: 'AWS Core Services (EC2, S3, IAM) & Serverless Architecture',
+      whyFocus: 'Target cloud infrastructure specified in company job requirements.',
+      actionPlan: 'Review Lambda, S3 security policies, DynamoDB, and API Gateway.',
+    },
+    MongoDB: {
+      topic: 'MongoDB Document Modeling, Indexing & Aggregation Framework',
+      whyFocus: 'Core NoSQL document database requirement in company JD.',
+      actionPlan: 'Practice aggregation pipelines ($match, $group, $lookup) and indexing strategies.',
+    },
+    DSA: {
+      topic: 'Data Structures and Algorithms (Arrays, Graphs, DP)',
+      whyFocus: 'Core technical screening competency required for coding rounds.',
+      actionPlan: 'Practice two-pointer techniques, graph traversals (BFS/DFS), and dynamic programming.',
+    },
+    'System Design': {
+      topic: 'Distributed System Design & High Concurrency Architecture',
+      whyFocus: 'Evaluated in technical interview rounds for scalability and reliability.',
+      actionPlan: 'Study load balancing, caching tiers, database sharding, and message queues.',
+    },
+    JavaScript: {
+      topic: 'JavaScript Async/Await, Event Loop & Closures',
+      whyFocus: 'Core foundation required across full stack development.',
+      actionPlan: 'Review prototype chains, promises, event loop microtasks, and ES6+ features.',
+    },
+    TypeScript: {
+      topic: 'TypeScript Generics, Utility Types & Type Guards',
+      whyFocus: 'Required in JD for type-safe frontend and backend enterprise systems.',
+      actionPlan: 'Practice custom generics, Pick/Omit utility types, and discriminated unions.',
+    },
+    Python: {
+      topic: 'Python Object-Oriented Patterns & Generators',
+      whyFocus: 'Backend scripting and data processing requirement in JD.',
+      actionPlan: 'Review decorators, generators, list comprehensions, and OOP design patterns.',
+    },
+    'Machine Learning': {
+      topic: 'Machine Learning Algorithms & Model Validation',
+      whyFocus: 'Key domain requirement for AI/ML engineering positions.',
+      actionPlan: 'Review supervised/unsupervised models, cross-validation, and bias-variance tradeoff.',
+    },
+    Pandas: {
+      topic: 'Pandas DataFrames, Vectorization & Data Cleaning',
+      whyFocus: 'Required for tabular data processing and analytics pipelines.',
+      actionPlan: 'Practice groupby aggregations, vectorization, handling missing values, and merges.',
+    },
+    NumPy: {
+      topic: 'NumPy Array Manipulation & Matrix Operations',
+      whyFocus: 'Fundamental numerical computation library in AI/data roles.',
+      actionPlan: 'Review broadcasting, array indexing, matrix multiplication, and vector math.',
+    },
+    'Model Evaluation': {
+      topic: 'Model Evaluation Metrics (ROC-AUC, Precision, Recall, F1)',
+      whyFocus: 'Critical for evaluating production machine learning models.',
+      actionPlan: 'Review confusion matrices, classification reports, and cross-validation techniques.',
+    },
+    Microservices: {
+      topic: 'Microservices Communication, Sagas & Resiliency',
+      whyFocus: 'Modern distributed architecture emphasized in company technical stack.',
+      actionPlan: 'Study synchronous REST/gRPC vs asynchronous messaging and circuit breakers.',
+    },
   };
 
   // Prioritize preparation topics based on JD requirements
   const importantTopics = [];
+  const areasToFocusDetailed = [];
   const preparationPriority = [];
 
   // A. High-importance missing JD skills get top priority
   skillsToImprove
     .filter((s) => s.importance === 'high')
     .forEach((s) => {
-      const topicName = topicMap[s.skill] || `${s.skill} Core Principles & Best Practices`;
-      importantTopics.push({ topic: topicName, priority: 'HIGH', skill: s.skill });
+      const meta = topicMap[s.skill];
+      const topicName = meta?.topic || `${s.skill} Core Principles & Best Practices`;
+      const whyFocus = meta?.whyFocus || `High-priority skill explicitly required in the company JD.`;
+      const actionPlan = meta?.actionPlan || `Review fundamental concepts, common interview questions, and practical code patterns in ${s.skill}.`;
+
+      importantTopics.push({ topic: topicName, priority: 'HIGH', skill: s.skill, whyFocus, actionPlan });
+      areasToFocusDetailed.push({ topic: topicName, priority: 'HIGH', skill: s.skill, whyFocus, actionPlan });
       preparationPriority.push(`${topicName} — HIGH`);
     });
 
@@ -413,16 +499,26 @@ const analyzeSkillGap = ({ resumeText = '', jdText = '', resumeSkills = [], jdSk
   skillsToImprove
     .filter((s) => s.importance !== 'high')
     .forEach((s) => {
-      const topicName = topicMap[s.skill] || `${s.skill} Implementation & Interview Questions`;
-      importantTopics.push({ topic: topicName, priority: 'MEDIUM', skill: s.skill });
+      const meta = topicMap[s.skill];
+      const topicName = meta?.topic || `${s.skill} Implementation & Interview Questions`;
+      const whyFocus = meta?.whyFocus || (s.isPartial ? `Mentioned in resume with limited project depth; prepare for in-depth technical verification.` : `Preferred skill listed in the company JD.`);
+      const actionPlan = meta?.actionPlan || `Prepare project examples and review practical use cases for ${s.skill}.`;
+
+      importantTopics.push({ topic: topicName, priority: 'MEDIUM', skill: s.skill, whyFocus, actionPlan });
+      areasToFocusDetailed.push({ topic: topicName, priority: 'MEDIUM', skill: s.skill, whyFocus, actionPlan });
       preparationPriority.push(`${topicName} — MEDIUM`);
     });
 
   // C. Matched skills for interview verification
   matchedSkills.forEach((s) => {
-    if (importantTopics.length < 5) {
-      const topicName = topicMap[s.skill] || `${s.skill} Advanced Patterns & Optimization`;
-      importantTopics.push({ topic: topicName, priority: 'MEDIUM', skill: s.skill });
+    if (importantTopics.length < 6) {
+      const meta = topicMap[s.skill];
+      const topicName = meta?.topic || `${s.skill} Advanced Patterns & Optimization`;
+      const whyFocus = meta?.whyFocus || `Strong match from your resume; prepare for deep-dive technical questions on your past implementations.`;
+      const actionPlan = meta?.actionPlan || `Be ready to explain architectural trade-offs and code implementation details for your ${s.skill} projects.`;
+
+      importantTopics.push({ topic: topicName, priority: 'MEDIUM', skill: s.skill, whyFocus, actionPlan });
+      areasToFocusDetailed.push({ topic: topicName, priority: 'MEDIUM', skill: s.skill, whyFocus, actionPlan });
       preparationPriority.push(`${topicName} — MEDIUM`);
     }
   });
@@ -436,10 +532,14 @@ const analyzeSkillGap = ({ resumeText = '', jdText = '', resumeSkills = [], jdSk
     jdRequirements,
     matchedSkills: matchedSkillNames,
     matchedSkillsDetailed: matchedSkills,
+    missingSkills: skillsToImproveNames,
+    missingSkillsDetailed: skillsToImprove,
     partialSkills: partialSkills.map((p) => p.skill),
     partialSkillsDetailed: partialSkills,
     skillsToImprove: skillsToImproveNames,
     skillsToImproveDetailed: skillsToImprove,
+    areasToFocus: importantTopicNames,
+    areasToFocusDetailed,
     importantTopics: importantTopicNames,
     importantTopicsDetailed: importantTopics,
     recommendedTopics: importantTopicNames,

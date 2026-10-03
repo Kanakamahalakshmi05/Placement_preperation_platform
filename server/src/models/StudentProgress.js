@@ -14,11 +14,8 @@ const studentProgressSchema = new mongoose.Schema(
       default: false,
     },
     aiAnalysisData: {
-      strongSkills: { type: [String], default: [] },
-      improvementSkills: { type: [String], default: [] },
-      missingSkills: { type: [String], default: [] },
-      recommendedTopics: { type: [String], default: [] },
-      analyzedAt: { type: Date },
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
     },
     isPreparing: {
       type: Boolean,

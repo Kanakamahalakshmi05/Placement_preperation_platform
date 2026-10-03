@@ -335,11 +335,17 @@ const gatherCandidateContext = async (session, studentId) => {
     isValid: true,
   }).sort({ createdAt: -1 });
 
+  // Filter past completed interviews based on session.interviewType
+  const typeFilter = session.interviewType === 'hr'
+    ? { interviewType: 'hr' }
+    : { $or: [{ interviewType: 'technical' }, { interviewType: { $exists: false } }] };
+
   // Retrieve past completed interviews
   const pastInterviews = await TechnicalInterview.find({
     studentId,
     _id: { $ne: session._id },
     status: 'COMPLETED',
+    ...typeFilter,
   }).sort({ attemptNumber: -1 });
 
   const pastQuestions = [];
@@ -387,7 +393,7 @@ const gatherCandidateContext = async (session, studentId) => {
     resume,
     resumeProfile,
     companyName: jobTarget?.company || session.companyName || 'Target Company',
-    targetRole: 'Software Engineer',
+    targetRole: jobTarget?.jobTitle || 'Software Engineer',
     jdText: jobTarget?.jobDescription || '',
     jdRequiredSkills: Array.isArray(jobTarget?.extractedSkills) ? jobTarget.extractedSkills : [],
     matchedSkills: analysisRecord?.analysis?.matchedSkills || [],
@@ -400,10 +406,15 @@ const gatherCandidateContext = async (session, studentId) => {
 
 /**
  * Creates a brand new interview session for a student without any upper limit.
- * Analyzes the student's actual resume into a structured interview profile immediately.
+ * Supports interviewType: 'technical' or 'hr'.
  */
-const createInterviewSession = async (studentId) => {
-  const count = await TechnicalInterview.countDocuments({ studentId });
+const createInterviewSession = async (studentId, interviewType = 'technical') => {
+  const validInterviewType = interviewType === 'hr' ? 'hr' : 'technical';
+  const countQuery = validInterviewType === 'hr'
+    ? { studentId, interviewType: 'hr' }
+    : { studentId, $or: [{ interviewType: 'technical' }, { interviewType: { $exists: false } }] };
+
+  const count = await TechnicalInterview.countDocuments(countQuery);
   const attemptNumber = count + 1;
 
   // Retrieve student's actual resume and target job
@@ -423,11 +434,12 @@ const createInterviewSession = async (studentId) => {
     resumeId: resume?._id,
     targetJobId: jobTarget?._id,
     companyName: jobTarget?.company || 'Target Company',
+    interviewType: validInterviewType,
     attemptNumber,
     status: 'NOT_STARTED',
     duration: 1200, // 20 minutes
     resumeProfile,
-    currentPhase: 'TECHNICAL_SKILLS',
+    currentPhase: validInterviewType === 'hr' ? 'HR_BEHAVIORAL' : 'TECHNICAL_SKILLS',
     interviewContext: {
       coveredSkills: [],
       uncoveredImportantSkills: Array.isArray(resumeProfile.technicalSkills) ? resumeProfile.technicalSkills.slice() : [],
@@ -545,6 +557,12 @@ const generateNextQuestion = async (interviewId, studentId) => {
   }
 
   const context = await gatherCandidateContext(session, studentId);
+
+  // If HR Interview, route to dedicated HR question generator
+  if (session.interviewType === 'hr') {
+    return await generateNextHRQuestion(session, context);
+  }
+
   const currentQuestions = session.questions || [];
   const currentCount = currentQuestions.length;
   const lastQuestion = currentCount > 0 ? currentQuestions[currentCount - 1] : null;
@@ -1299,8 +1317,10 @@ const endInterviewSession = async (interviewId, studentId, isTimeExpired = false
   session.status = 'COMPLETED';
   session.endTime = new Date();
 
-  // Run comprehensive evidence-based AI evaluation
-  const evaluation = await evaluateInterview(session, studentId);
+  // Run comprehensive evidence-based AI evaluation (HR or Technical)
+  const evaluation = session.interviewType === 'hr'
+    ? await evaluateHRInterview(session, studentId)
+    : await evaluateInterview(session, studentId);
   session.evaluation = evaluation;
 
   await session.save();
@@ -1703,10 +1723,500 @@ const buildDeterministicEvaluation = (session, resumeSkills = []) => {
 };
 
 /**
- * Retrieves the student's mock interview history ordered newest first.
+ * Deterministic Fallback HR Question Generator
  */
-const getInterviewHistory = async (studentId) => {
-  const history = await TechnicalInterview.find({ studentId })
+const generateDeterministicHRQuestion = (context, currentQuestions, currentCount) => {
+  const company = context.companyName || 'our company';
+  const role = context.targetRole || 'Software Engineer';
+  const projects = context.resumeProfile?.projects || [];
+  const primaryProject = projects[0]?.name || 'a major project';
+  const lastQuestion = currentQuestions.length > 0 ? currentQuestions[currentQuestions.length - 1] : null;
+  const lastAnswer = (lastQuestion?.studentAnswer || '').trim();
+
+  if (lastAnswer && lastAnswer.length > 0 && lastAnswer.length < 50 && !lastQuestion?.isFollowUp) {
+    return {
+      questionId: `hr_q_${currentCount + 1}_${Date.now()}`,
+      questionText: `Can you elaborate on your specific personal contribution and what the final measurable result or impact was?`,
+      topic: 'Behavioral Reasoning (STAR Action & Result)',
+      questionType: 'hr_behavioral',
+      expectedPoints: ['Specific individual action taken', 'Measurable outcome or learning'],
+      difficulty: 'medium',
+      reason: 'Probing for specific action and outcome following a concise response',
+      isFollowUp: true,
+      askedAt: new Date(),
+      studentAnswer: '',
+    };
+  }
+
+  const defaultHRQuestions = [
+    {
+      topic: 'Tell Me About Yourself & Role Motivation',
+      text: `Welcome to your HR interview for ${company}! To start off, please introduce yourself, highlight your background, and share why you are interested in joining ${company} as a ${role}.`,
+    },
+    {
+      topic: 'Teamwork & Collaboration',
+      text: `Tell me about a time you worked in a team on a project like ${primaryProject}. What was your specific role, and how did you resolve any differing opinions among team members?`,
+    },
+    {
+      topic: 'Handling Pressure & Deadlines',
+      text: `Describe a situation where you faced a tight deadline or high-pressure scenario. How did you prioritize your tasks and maintain quality?`,
+    },
+    {
+      topic: 'Strengths & Areas for Improvement',
+      text: `What would you consider your greatest professional strength, and what is one area or weakness you are actively working to improve?`,
+    },
+    {
+      topic: 'Failure & Problem Solving',
+      text: `Tell me about a time when something did not go as planned in a project or assignment. What went wrong, how did you handle it, and what did you learn from it?`,
+    },
+    {
+      topic: 'Adaptability & Learning',
+      text: `Technology and requirements evolve quickly. Can you describe a time when you had to learn a new tool, process, or domain rapidly to accomplish a goal?`,
+    },
+    {
+      topic: 'Career Goals & Company Fit',
+      text: `Where do you see yourself in the next 3 to 5 years, and how do you feel this position at ${company} will help you achieve your career aspirations?`,
+    },
+    {
+      topic: 'Why Should We Hire You',
+      text: `Why should ${company} hire you for the ${role} position over other qualified candidates?`,
+    },
+  ];
+
+  const index = Math.min(currentCount, defaultHRQuestions.length - 1);
+  const qObj = defaultHRQuestions[index] || defaultHRQuestions[0];
+
+  return {
+    questionId: `hr_q_${currentCount + 1}_${Date.now()}`,
+    questionText: qObj.text,
+    topic: qObj.topic,
+    questionType: 'hr_behavioral',
+    expectedPoints: ['Clear structured response', 'Personal reflection', 'Relevance to target role'],
+    difficulty: 'medium',
+    reason: 'Sequential HR behavioral question progression',
+    isFollowUp: false,
+    askedAt: new Date(),
+    studentAnswer: '',
+  };
+};
+
+/**
+ * Adaptive AI HR Question Generator
+ */
+const generateNextHRQuestion = async (session, context = {}) => {
+  const currentQuestions = session.questions || [];
+  const currentCount = currentQuestions.length;
+  const lastQuestion = currentCount > 0 ? currentQuestions[currentCount - 1] : null;
+
+  const ctx = context || {};
+  const profile = ctx.resumeProfile || {};
+  const companyName = ctx.companyName || session.company || 'Target Company';
+  const targetRole = ctx.targetRole || session.targetRole || 'Software Engineer';
+  const projectsList = profile.projects?.length > 0 ? profile.projects : [];
+  const pastWeaknesses = ctx.pastWeaknesses || session.pastWeaknesses || [];
+
+  const aiClient = getAIClient();
+  let generatedQuestion = null;
+
+  if (aiClient) {
+    try {
+      const prompt = `You are an experienced Corporate HR Manager & Senior Talent Acquisition Lead conducting a realistic, 20-minute HR / Behavioral Mock Interview for ${context.companyName}.
+
+=== CANDIDATE CONTEXT ===
+- Target Company: ${context.companyName}
+- Target Role: ${context.targetRole}
+- Job Description Context: ${context.jdText ? context.jdText.substring(0, 500) : 'General corporate hiring for ' + context.targetRole}
+- Candidate Projects (from Resume): ${projectsList.map((p) => p.name).join(', ') || 'Academic & Personal Software Projects'}
+- Past HR Weaknesses to Address: ${pastWeaknesses.join(', ') || 'None identified yet'}
+
+=== CONVERSATIONAL STATE & TRANSCRIPT ===
+- Turn: #${currentCount + 1}
+- Questions & Answers So Far:
+${
+  currentQuestions.length > 0
+    ? currentQuestions
+        .map(
+          (q, i) =>
+            `  Q${i + 1} [Topic: ${q.topic}]: "${q.questionText}"\n  Candidate Answer: "${q.studentAnswer || '(No answer provided / Skipped)'}"`
+        )
+        .join('\n\n')
+    : '  None (Opening HR Turn).'
+}
+
+=== HR INTERVIEW RULES & ADAPTIVITY INSTRUCTIONS ===
+1. DO NOT ask technical architectural, coding, or algorithmic questions. This is strictly an HR/Behavioral interview.
+2. Ask ONLY ONE clear, professional question at a time.
+3. Tailor questions using the candidate's resume, target company (${context.companyName}), and target role (${context.targetRole}).
+4. Adaptive Follow-up Logic:
+   - If the candidate's last answer was brief or vague, ask a follow-up probing for their specific individual action (STAR method Action).
+   - If the candidate provided Situation and Task but NO clear outcome/result, ask: "What was the final outcome or measurable result of your effort?"
+   - If the candidate provided a strong, complete answer, transition to a new HR category or ask how they would apply what they learned in a team/corporate setting.
+   - If the candidate answered "I don't know" or passed, transition smoothly to another relevant HR topic without being punitive.
+5. Coverage Areas across the interview turns:
+   - Turn 1: Warm introduction / Tell me about yourself / Why you are interested in ${context.companyName} and ${context.targetRole}.
+   - Behavioral & STAR Method Questions: Teamwork, Leadership, Conflict Resolution, Handling Pressure, Failure/Learning, Time Management, Adaptability, Problem Solving under constraints.
+   - Company & Role Alignment: Career goals, strengths, weaknesses, work environment preferences.
+6. NEVER repeat a question or topic already covered in this session.
+
+Return ONLY a valid JSON object matching this schema:
+{
+  "questionId": "hr_q_${currentCount + 1}_${Date.now()}",
+  "questionText": "Clear, professional HR question text here",
+  "topic": "Category topic (e.g. Tell Me About Yourself, Teamwork & Conflict, Leadership, STAR Behavioral, Career Goals, etc.)",
+  "questionType": "hr_behavioral",
+  "expectedPoints": ["point 1", "point 2"],
+  "difficulty": "medium",
+  "reason": "Why this specific question was chosen adaptively based on context",
+  "isFollowUp": false
+}`;
+
+      const response = await aiClient.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+      });
+
+      const responseText = response.text || '';
+      const cleanJson = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
+
+      if (parsed && parsed.questionText) {
+        generatedQuestion = {
+          questionId: parsed.questionId || `hr_q_${currentCount + 1}_${Date.now()}`,
+          questionText: parsed.questionText,
+          topic: parsed.topic || 'HR & Behavioral',
+          questionType: 'hr_behavioral',
+          expectedPoints: Array.isArray(parsed.expectedPoints) ? parsed.expectedPoints : [],
+          difficulty: parsed.difficulty || 'medium',
+          reason: parsed.reason || 'Adaptive HR interview flow',
+          isFollowUp: !!parsed.isFollowUp,
+          askedAt: new Date(),
+          studentAnswer: '',
+        };
+      }
+    } catch (err) {
+      console.warn('[InterviewService] Gemini HR Question Generator fallback triggered:', err.message);
+    }
+  }
+
+  if (!generatedQuestion) {
+    generatedQuestion = generateDeterministicHRQuestion(context, currentQuestions, currentCount);
+  }
+
+  session.questions.push(generatedQuestion);
+  await session.save();
+
+  return {
+    isCompleted: false,
+    session,
+    question: generatedQuestion,
+    remainingSeconds: calculateRemainingSeconds(session),
+    attemptNumber: session.attemptNumber,
+    questionIndex: session.questions.length,
+  };
+};
+
+/**
+ * Deterministic Fallback HR Evaluation Engine
+ */
+const evaluateHRInterviewDeterministic = (session, context) => {
+  const questions = session.questions || [];
+  const questionEvaluations = [];
+  const strengths = [];
+  const weaknesses = [];
+  const recommendations = [];
+
+  let totalScoreSum = 0;
+
+  questions.forEach((q, idx) => {
+    const answer = (q.studentAnswer || '').trim();
+    const wordCount = answer ? answer.split(/\s+/).length : 0;
+    const lowerAnswer = answer.toLowerCase();
+
+    const starKeywords = ['situation', 'task', 'action', 'result', 'because', 'learned', 'team', 'resolved', 'achieved', 'outcome'];
+    const matchedCount = starKeywords.filter((k) => lowerAnswer.includes(k)).length;
+
+    let score = 50;
+    let correctness = 'average';
+    let depth = 'brief';
+
+    if (wordCount === 0 || lowerAnswer.includes("don't know") || lowerAnswer.includes("skip")) {
+      score = 30;
+      correctness = 'needs_work';
+      depth = 'brief';
+      weaknesses.push({
+        skill: q.topic || 'HR Response',
+        evidence: `Question "${q.questionText}": Candidate skipped or gave no answer.`,
+      });
+    } else if (wordCount >= 25 && matchedCount >= 2) {
+      score = Math.min(95, 75 + matchedCount * 3 + Math.min(10, Math.floor(wordCount / 5)));
+      correctness = 'good';
+      depth = 'thorough';
+      strengths.push({
+        skill: q.topic || 'Behavioral Response',
+        evidence: `Demonstrated clear reasoning: "${answer.substring(0, 100)}..."`,
+      });
+    } else {
+      score = Math.min(78, 55 + matchedCount * 4 + Math.min(10, Math.floor(wordCount / 4)));
+      correctness = 'average';
+      depth = 'adequate';
+      if (wordCount < 15) {
+        weaknesses.push({
+          skill: q.topic || 'Behavioral Depth',
+          evidence: `Answer was brief: "${answer}"`,
+        });
+      }
+    }
+
+    questionEvaluations.push({
+      questionId: q.questionId || `hr_q_${idx + 1}`,
+      question: q.questionText,
+      answer,
+      score,
+      correctness,
+      depth,
+      feedback: score >= 80 ? 'Strong behavioral response with relevant examples.' : 'Answer provides basic context. Use the STAR method to elaborate on results.',
+    });
+
+    totalScoreSum += score;
+  });
+
+  const baseScore = questions.length > 0 ? Math.round(totalScoreSum / questions.length) : 70;
+
+  const communicationClarity = Math.min(100, Math.max(50, baseScore + 2));
+  const confidenceComposure = Math.min(100, Math.max(50, baseScore));
+  const teamwork = Math.min(100, Math.max(50, baseScore + 3));
+  const leadership = Math.min(100, Math.max(50, baseScore - 2));
+  const problemSolving = Math.min(100, Math.max(50, baseScore + 1));
+  const adaptability = Math.min(100, Math.max(50, baseScore + 2));
+  const roleMotivation = Math.min(100, Math.max(50, baseScore - 1));
+  const behavioralReasoning = Math.min(100, Math.max(50, baseScore));
+  const professionalism = Math.min(100, Math.max(50, baseScore + 4));
+  const answerRelevance = Math.min(100, Math.max(50, baseScore + 1));
+
+  const overallScore = Math.round(
+    communicationClarity * 0.15 +
+      confidenceComposure * 0.10 +
+      teamwork * 0.10 +
+      leadership * 0.10 +
+      problemSolving * 0.10 +
+      adaptability * 0.10 +
+      roleMotivation * 0.10 +
+      behavioralReasoning * 0.10 +
+      professionalism * 0.10 +
+      answerRelevance * 0.05
+  );
+
+  if (strengths.length === 0) {
+    strengths.push({ skill: 'Professional Demeanor', evidence: 'Maintained polite interaction during interview.' });
+  }
+  if (weaknesses.length === 0) {
+    weaknesses.push({ skill: 'Specific Action Details', evidence: 'Could provide more quantitative impact metrics in behavioral responses.' });
+  }
+
+  recommendations.push(
+    { topic: 'STAR Method', reason: 'Structure behavioral answers into Situation, Task, Action, and Result.' },
+    { topic: 'Conflict Resolution & Leadership', reason: 'Prepare 2-3 detailed examples of resolving team disagreements.' },
+    { topic: 'Role & Company Motivation', reason: 'Research target company values to articulate "Why this company?" clearly.' }
+  );
+
+  return {
+    overallScore,
+    communicationClarity,
+    confidenceComposure,
+    teamwork,
+    leadership,
+    problemSolving,
+    adaptability,
+    roleMotivation,
+    behavioralReasoning,
+    professionalism,
+    answerRelevance,
+    communicationObservations: 'Candidate demonstrated clear spoken communication and polite tone. Further practice with the STAR framework will enhance response structure.',
+    recommendedNextAreas: ['STAR Method Structure', 'Conflict-Resolution Examples', 'Leadership & Initiative', 'Company Alignment'],
+    strengths: strengths.slice(0, 5),
+    weaknesses: weaknesses.slice(0, 5),
+    recommendations: recommendations.slice(0, 5),
+    questionEvaluations,
+    evaluatedAt: new Date(),
+  };
+};
+
+/**
+ * AI HR Interview Evaluation Engine
+ */
+const evaluateHRInterview = async (session, studentId) => {
+  const questions = session.questions || [];
+  let context = {};
+  try {
+    if (studentId) {
+      context = await gatherCandidateContext(session, studentId);
+    }
+  } catch (err) {
+    context = {
+      companyName: session.company || 'Target Company',
+      targetRole: session.targetRole || 'Software Engineer',
+      pastWeaknesses: session.pastWeaknesses || [],
+    };
+  }
+
+  const transcript = questions
+    .map(
+      (q, i) =>
+        `[Question #${i + 1} - Category: ${q.topic}]
+Interviewer: "${q.questionText}"
+Candidate Answer: "${q.studentAnswer || '(No answer provided / Skipped)'}"`
+    )
+    .join('\n\n');
+
+  const aiClient = getAIClient();
+
+  if (aiClient && questions.length > 0) {
+    try {
+      const prompt = `You are a Senior Corporate HR Director conducting an official evaluation of a candidate's HR / Behavioral Mock Interview for ${context.companyName} (${context.targetRole}).
+
+=== INTERVIEW TRANSCRIPT ===
+${transcript}
+
+=== EVALUATION DIRECTIVES ===
+Evaluate the candidate's actual responses across these 10 categories (Each scored 0-100):
+1. communicationClarity (15% weight): Clear articulation, structured phrasing, professional tone.
+2. confidenceComposure (10% weight): Poise, composure, comfort with questions.
+3. teamwork (10% weight): Collaboration, listening, empathy, resolving team conflict.
+4. leadership (10% weight): Initiative, taking ownership, guiding outcomes.
+5. problemSolving (10% weight): Logical reasoning, resourcefulness under behavioral challenges.
+6. adaptability (10% weight): Flexibility under change, handling failure, learning mindset.
+7. roleMotivation (10% weight): Enthusiasm for ${context.companyName} and ${context.targetRole}.
+8. behavioralReasoning (10% weight): STAR method adherence (Situation, Task, Action, Result).
+9. professionalism (10% weight): Respectful interaction, business awareness.
+10. answerRelevance (5% weight): Directly addressing the question without rambling.
+
+Calculate overallScore using exact weighted sum:
+overallScore = Math.round(
+  communicationClarity * 0.15 +
+  confidenceComposure * 0.10 +
+  teamwork * 0.10 +
+  leadership * 0.10 +
+  problemSolving * 0.10 +
+  adaptability * 0.10 +
+  roleMotivation * 0.10 +
+  behavioralReasoning * 0.10 +
+  professionalism * 0.10 +
+  answerRelevance * 0.05
+);
+
+Return ONLY a valid JSON object matching this schema:
+{
+  "overallScore": 82,
+  "communicationClarity": 85,
+  "confidenceComposure": 86,
+  "teamwork": 88,
+  "leadership": 76,
+  "problemSolving": 80,
+  "adaptability": 84,
+  "roleMotivation": 79,
+  "behavioralReasoning": 82,
+  "professionalism": 86,
+  "answerRelevance": 85,
+  "communicationObservations": "Clear communication and articulate phrasing throughout the interview.",
+  "recommendedNextAreas": ["STAR Method", "Conflict-resolution examples", "Why this company"],
+  "strengths": [
+    { "skill": "Team Collaboration", "evidence": "Described working with cross-functional peers..." }
+  ],
+  "weaknesses": [
+    { "skill": "STAR Method Results", "evidence": "Gave situation but omitted quantifiable results..." }
+  ],
+  "recommendations": [
+    { "topic": "STAR Method", "reason": "Ensure every behavioral response ends with measurable outcomes." }
+  ],
+  "questionEvaluations": [
+    {
+      "questionId": "q_1",
+      "question": "question text",
+      "answer": "answer text",
+      "score": 85,
+      "correctness": "good",
+      "depth": "adequate",
+      "feedback": "Great overview of team dynamic."
+    }
+  ]
+}`;
+
+      const response = await aiClient.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+      });
+
+      const responseText = response.text || '';
+      const cleanJson = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+      const parsed = JSON.parse(cleanJson);
+
+      if (parsed && typeof parsed.overallScore === 'number') {
+        const comm = parsed.communicationClarity ?? 75;
+        const conf = parsed.confidenceComposure ?? 75;
+        const team = parsed.teamwork ?? 75;
+        const lead = parsed.leadership ?? 75;
+        const prob = parsed.problemSolving ?? 75;
+        const adapt = parsed.adaptability ?? 75;
+        const mot = parsed.roleMotivation ?? 75;
+        const beh = parsed.behavioralReasoning ?? 75;
+        const prof = parsed.professionalism ?? 75;
+        const rel = parsed.answerRelevance ?? 75;
+
+        const calculatedOverall = Math.round(
+          comm * 0.15 +
+            conf * 0.10 +
+            team * 0.10 +
+            lead * 0.10 +
+            prob * 0.10 +
+            adapt * 0.10 +
+            mot * 0.10 +
+            beh * 0.10 +
+            prof * 0.10 +
+            rel * 0.05
+        );
+
+        return {
+          overallScore: calculatedOverall,
+          communicationClarity: comm,
+          confidenceComposure: conf,
+          teamwork: team,
+          leadership: lead,
+          problemSolving: prob,
+          adaptability: adapt,
+          roleMotivation: mot,
+          behavioralReasoning: beh,
+          professionalism: prof,
+          answerRelevance: rel,
+          communicationObservations: parsed.communicationObservations || 'Clear and professional communication observed.',
+          recommendedNextAreas: Array.isArray(parsed.recommendedNextAreas) ? parsed.recommendedNextAreas : ['STAR Method', 'Conflict Resolution'],
+          strengths: Array.isArray(parsed.strengths) ? parsed.strengths : [],
+          weaknesses: Array.isArray(parsed.weaknesses) ? parsed.weaknesses : [],
+          recommendations: Array.isArray(parsed.recommendations) ? parsed.recommendations : [],
+          questionEvaluations: Array.isArray(parsed.questionEvaluations) ? parsed.questionEvaluations : [],
+          evaluatedAt: new Date(),
+        };
+      }
+    } catch (err) {
+      console.warn('[InterviewService] Gemini HR Evaluation fallback triggered:', err.message);
+    }
+  }
+
+  return evaluateHRInterviewDeterministic(session, context);
+};
+
+/**
+ * Retrieves the student's mock interview history ordered newest first.
+ * Supports filtering by interviewType ('technical' | 'hr').
+ */
+const getInterviewHistory = async (studentId, interviewType) => {
+  const query = { studentId };
+  if (interviewType === 'hr') {
+    query.interviewType = 'hr';
+  } else if (interviewType === 'technical') {
+    query.$or = [{ interviewType: 'technical' }, { interviewType: { $exists: false } }];
+  }
+
+  const history = await TechnicalInterview.find(query)
     .sort({ attemptNumber: -1, createdAt: -1 })
     .lean();
 
@@ -1714,11 +2224,13 @@ const getInterviewHistory = async (studentId) => {
     id: item._id,
     attemptNumber: item.attemptNumber,
     companyName: item.companyName,
+    interviewType: item.interviewType || 'technical',
     status: item.status,
     createdAt: item.createdAt,
     duration: item.duration,
     questionCount: item.questions ? item.questions.length : 0,
     overallScore: item.evaluation?.overallScore ?? null,
+    evaluation: item.evaluation,
   }));
 };
 
@@ -1735,6 +2247,7 @@ const getInterviewEvaluation = async (interviewId, studentId) => {
     id: session._id,
     attemptNumber: session.attemptNumber,
     companyName: session.companyName,
+    interviewType: session.interviewType || 'technical',
     status: session.status,
     startTime: session.startTime,
     endTime: session.endTime,
@@ -1749,8 +2262,12 @@ module.exports = {
   createInterviewSession,
   startInterviewSession,
   generateNextQuestion,
+  generateNextHRQuestion,
+  generateDeterministicHRQuestion,
   submitInterviewAnswer,
   endInterviewSession,
+  evaluateInterview,
+  evaluateHRInterview,
   getInterviewHistory,
   getInterviewEvaluation,
   calculateRemainingSeconds,

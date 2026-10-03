@@ -8,15 +8,17 @@ const TechnicalInterview = require('../models/TechnicalInterview');
 const createSession = async (req, res, next) => {
   try {
     const studentId = req.user._id;
-    const session = await interviewService.createInterviewSession(studentId);
+    const { interviewType = 'technical' } = req.body || {};
+    const session = await interviewService.createInterviewSession(studentId, interviewType);
 
     res.status(201).json({
       success: true,
-      message: `Technical Mock Interview #${session.attemptNumber} session created.`,
+      message: `${session.interviewType === 'hr' ? 'HR' : 'Technical'} Mock Interview #${session.attemptNumber} session created.`,
       data: {
         id: session._id,
         attemptNumber: session.attemptNumber,
         companyName: session.companyName,
+        interviewType: session.interviewType || 'technical',
         duration: session.duration,
         status: session.status,
       },
@@ -44,11 +46,12 @@ const startSession = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      message: 'Technical Mock Interview started.',
+      message: `${session.interviewType === 'hr' ? 'HR' : 'Technical'} Mock Interview started.`,
       data: {
         id: session._id,
         attemptNumber: session.attemptNumber,
         companyName: session.companyName,
+        interviewType: session.interviewType || 'technical',
         status: session.status,
         startTime: session.startTime,
         remainingSeconds,
@@ -84,6 +87,7 @@ const getStatus = async (req, res, next) => {
         attemptNumber: session.attemptNumber,
         status: session.status,
         companyName: session.companyName,
+        interviewType: session.interviewType || 'technical',
         remainingSeconds,
         questionCount: session.questions ? session.questions.length : 0,
       },
@@ -189,7 +193,8 @@ const endSession = async (req, res, next) => {
 const getHistory = async (req, res, next) => {
   try {
     const studentId = req.user._id;
-    const history = await interviewService.getInterviewHistory(studentId);
+    const { type } = req.query;
+    const history = await interviewService.getInterviewHistory(studentId, type);
 
     res.status(200).json({
       success: true,

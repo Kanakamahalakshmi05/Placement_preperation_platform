@@ -283,52 +283,76 @@ const triggerAIAnalysis = async (req, res, next) => {
     const aiClient = getAIClient();
     if (aiClient) {
       try {
-        const prompt = `You are a Senior Technical Hiring Manager and Placement Specialist.
-Your task is to analyze a candidate's resume against a company job description (JD).
+        const prompt = `You are a Senior Technical Hiring Manager and Principal Placement Specialist.
+Your task is to conduct a precise, evidence-based skill gap analysis comparing a candidate's resume with a company's Job Description (JD).
 
-=== RESUME ===
+=== CANDIDATE RESUME ===
 ${(resume.rawText || '').trim()}
 
-=== COMPANY ===
+=== TARGET COMPANY ===
 ${jobTarget.company || 'Target Company'}
 
-=== JOB DESCRIPTION ===
+=== TARGET ROLE ===
+${jobTarget.jobTitle || 'Software Engineer'}
+
+=== TARGET JOB DESCRIPTION (JD) ===
 ${(jobTarget.jobDescription || '').trim()}
 
-CRITICAL RULES:
-1. EXTRACT REQUIREMENTS FROM JD FIRST:
-   - Identify what the company actually requires or prefers (programming languages, frameworks, databases, tools, core CS).
-   - Do NOT start with resume technologies.
-2. EXTRACT ACTUAL RESUME EVIDENCE:
-   - For every JD skill, check if the resume has concrete evidence (projects, experience, action verbs) vs only listed in a keyword list vs completely missing.
-3. MATCHED SKILLS:
-   - Must ONLY include skills that are required/relevant to the JD AND where the resume shows clear evidence of practical experience or projects.
-   - Do NOT include resume skills that are irrelevant to this specific JD (for example, if JD is Frontend React/JS/HTML/CSS, do not include Python or Machine Learning in matched skills just because they are in the resume).
-4. SKILLS TO IMPROVE:
-   - Must include missing JD skills and weak/partial JD skills that the candidate must prepare.
-5. IMPORTANT TOPICS:
-   - Rank 5 specific interview preparation topics directly derived from the JD requirements and skill gaps.
+=== EVALUATION CRITERIA ===
+1. EXTRACT ALL JD REQUIREMENTS FIRST:
+   - Identify every required and preferred technology, language, framework, database, tool, and CS concept in the JD.
 
-Return ONLY a valid JSON object matching this EXACT structure (no markdown, no backticks, no preamble):
+2. MATCHED SKILLS (Resume + JD Overlap):
+   - Include ONLY skills required/relevant in the JD where the candidate's resume provides concrete project evidence, work experience, or verifiable implementation.
+   - Quote or summarize the specific resume evidence.
+   - DO NOT include skills from the resume that are irrelevant to this JD.
+
+3. MISSING SKILLS:
+   - Identify skills required or preferred by the JD that are completely missing or lack verifiable project depth in the resume.
+   - Categorize importance: "high" (core must-have) or "medium" (good-to-have / preferred).
+   - Provide a clear reason explaining why the company requires this skill for this role.
+
+4. AREAS TO FOCUS SEPARATELY (Targeted Technical Preparation Modules):
+   - Generate 4 to 6 prioritized preparation topics to bridge the gap and prepare the candidate for technical interview rounds.
+   - For each topic, provide:
+     * topic: Clear, professional topic name (e.g., "SQL Indexing & Complex Joins", "React State Architecture")
+     * priority: "HIGH" (for missing core JD skills) or "MEDIUM"
+     * skill: Target skill name
+     * whyFocus: Why this area is critical for this company/role
+     * actionPlan: Actionable study guidance, coding patterns, and interview concepts to master
+
+Return ONLY a valid JSON object matching this schema (no markdown formatting, no code blocks):
 {
   "jdRequirements": [
     { "skill": "React", "importance": "high" },
-    { "skill": "SQL", "importance": "high" }
+    { "skill": "Docker", "importance": "high" }
   ],
   "matchedSkills": [
-    { "skill": "React", "evidence": "Built a React-based application", "strength": "strong" }
+    {
+      "skill": "React",
+      "evidence": "Engineered responsive frontend interfaces using React hooks and modular components.",
+      "strength": "strong",
+      "jdContext": "Required for interactive UI development"
+    }
   ],
-  "partialSkills": [
-    { "skill": "SQL", "evidence": "SQL listed in skills with limited project evidence", "strength": "partial" }
+  "missingSkills": [
+    {
+      "skill": "Docker",
+      "importance": "high",
+      "reason": "Crucial requirement in the JD for containerized deployment, but absent from resume projects."
+    }
   ],
-  "skillsToImprove": [
-    { "skill": "Docker", "importance": "medium", "reason": "Required by JD but not found in resume" }
-  ],
-  "importantTopics": [
-    { "topic": "SQL Joins and Subqueries", "priority": "HIGH" }
+  "areasToFocus": [
+    {
+      "topic": "Docker Containerization & Multi-Stage Builds",
+      "priority": "HIGH",
+      "skill": "Docker",
+      "whyFocus": "Core requirement for deploying containerized microservices in production.",
+      "actionPlan": "Practice writing multi-stage Dockerfiles, optimizing layer caching, and setting up Docker Compose."
+    }
   ],
   "preparationPriority": [
-    "SQL Joins and Subqueries — HIGH"
+    "Docker Containerization & Multi-Stage Builds — HIGH"
   ]
 }`;
 
@@ -344,26 +368,40 @@ Return ONLY a valid JSON object matching this EXACT structure (no markdown, no b
           const aiMatched = Array.isArray(parsed.matchedSkills)
             ? parsed.matchedSkills.map((m) => (typeof m === 'object' ? m.skill : m)).filter(Boolean)
             : [];
-          const aiImprove = Array.isArray(parsed.skillsToImprove)
+          const aiMissing = Array.isArray(parsed.missingSkills)
+            ? parsed.missingSkills.map((s) => (typeof s === 'object' ? s.skill : s)).filter(Boolean)
+            : Array.isArray(parsed.skillsToImprove)
             ? parsed.skillsToImprove.map((s) => (typeof s === 'object' ? s.skill : s)).filter(Boolean)
             : [];
-          const aiTopics = Array.isArray(parsed.importantTopics)
+          const aiAreas = Array.isArray(parsed.areasToFocus)
+            ? parsed.areasToFocus.map((t) => (typeof t === 'object' ? t.topic : t)).filter(Boolean)
+            : Array.isArray(parsed.importantTopics)
             ? parsed.importantTopics.map((t) => (typeof t === 'object' ? t.topic : t)).filter(Boolean)
             : [];
 
-          if (aiMatched.length > 0 || aiImprove.length > 0) {
+          if (aiMatched.length > 0 || aiMissing.length > 0) {
+            const areasDetailed = Array.isArray(parsed.areasToFocus)
+              ? parsed.areasToFocus
+              : Array.isArray(parsed.importantTopics)
+              ? parsed.importantTopics
+              : finalAnalysis.areasToFocusDetailed;
+
             finalAnalysis = {
               jdRequirements: parsed.jdRequirements || finalAnalysis.jdRequirements,
-              matchedSkills: aiMatched,
+              matchedSkills: aiMatched.length > 0 ? aiMatched : finalAnalysis.matchedSkills,
               matchedSkillsDetailed: parsed.matchedSkills || finalAnalysis.matchedSkillsDetailed,
+              missingSkills: aiMissing.length > 0 ? aiMissing : finalAnalysis.missingSkills || finalAnalysis.skillsToImprove,
+              missingSkillsDetailed: parsed.missingSkills || parsed.skillsToImprove || finalAnalysis.missingSkillsDetailed || finalAnalysis.skillsToImproveDetailed,
               partialSkills: Array.isArray(parsed.partialSkills)
                 ? parsed.partialSkills.map((p) => (typeof p === 'object' ? p.skill : p))
                 : finalAnalysis.partialSkills,
               partialSkillsDetailed: parsed.partialSkills || finalAnalysis.partialSkillsDetailed,
-              skillsToImprove: aiImprove,
-              skillsToImproveDetailed: parsed.skillsToImprove || finalAnalysis.skillsToImproveDetailed,
-              importantTopics: aiTopics.length > 0 ? aiTopics : finalAnalysis.importantTopics,
-              importantTopicsDetailed: parsed.importantTopics || finalAnalysis.importantTopicsDetailed,
+              skillsToImprove: aiMissing.length > 0 ? aiMissing : finalAnalysis.skillsToImprove,
+              skillsToImproveDetailed: parsed.missingSkills || parsed.skillsToImprove || finalAnalysis.skillsToImproveDetailed,
+              areasToFocus: aiAreas.length > 0 ? aiAreas : finalAnalysis.areasToFocus || finalAnalysis.importantTopics,
+              areasToFocusDetailed: areasDetailed,
+              importantTopics: aiAreas.length > 0 ? aiAreas : finalAnalysis.importantTopics,
+              importantTopicsDetailed: areasDetailed,
               preparationPriority: parsed.preparationPriority || finalAnalysis.preparationPriority,
             };
           }
@@ -389,17 +427,23 @@ Return ONLY a valid JSON object matching this EXACT structure (no markdown, no b
     });
 
     const strongSkills = finalAnalysis.matchedSkills;
-    const missingSkills = finalAnalysis.skillsToImprove;
-    const recommendedTopics = finalAnalysis.importantTopics;
+    const missingSkills = finalAnalysis.missingSkills || finalAnalysis.skillsToImprove;
+    const areasToFocus = finalAnalysis.areasToFocus || finalAnalysis.importantTopics;
 
     const aiAnalysisData = {
       ...finalAnalysis,
       matchedSkills: strongSkills,
-      skillsToImprove: missingSkills,
-      importantTopics: recommendedTopics,
-      strongSkills,
+      matchedSkillsDetailed: finalAnalysis.matchedSkillsDetailed || [],
       missingSkills,
-      recommendedTopics,
+      missingSkillsDetailed: finalAnalysis.missingSkillsDetailed || [],
+      skillsToImprove: missingSkills,
+      skillsToImproveDetailed: finalAnalysis.skillsToImproveDetailed || [],
+      areasToFocus,
+      areasToFocusDetailed: finalAnalysis.areasToFocusDetailed || [],
+      importantTopics: areasToFocus,
+      importantTopicsDetailed: finalAnalysis.importantTopicsDetailed || [],
+      strongSkills,
+      recommendedTopics: areasToFocus,
       analyzedAt: newAnalysis.createdAt,
     };
 
@@ -423,8 +467,13 @@ Return ONLY a valid JSON object matching this EXACT structure (no markdown, no b
         analysisId: newAnalysis._id,
         companyName: newAnalysis.companyName,
         matchedSkills: strongSkills,
+        matchedSkillsDetailed: finalAnalysis.matchedSkillsDetailed || [],
+        missingSkills,
+        missingSkillsDetailed: finalAnalysis.missingSkillsDetailed || [],
+        areasToFocus,
+        areasToFocusDetailed: finalAnalysis.areasToFocusDetailed || [],
         skillsToImprove: missingSkills,
-        importantTopics: recommendedTopics,
+        importantTopics: areasToFocus,
         progress,
         aiAnalysisData,
       },

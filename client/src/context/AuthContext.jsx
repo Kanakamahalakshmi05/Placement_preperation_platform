@@ -13,30 +13,28 @@ export const AuthProvider = ({ children }) => {
     }
   });
   const [token, setToken] = useState(() => localStorage.getItem('token') || null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
-  // Validate existing token on mount
+  // Validate existing token in background on mount
   useEffect(() => {
     const verifyExistingSession = async () => {
       const storedToken = localStorage.getItem('token');
       if (!storedToken) {
-        setLoading(false);
         return;
       }
 
       try {
         const res = await api.get('/auth/me');
-        if (res.success && res.user) {
+        if (res && res.success && res.user) {
           setUser(res.user);
           localStorage.setItem('user', JSON.stringify(res.user));
-        } else {
-          logout();
         }
       } catch (err) {
-        console.warn('Session expired or invalid:', err.message);
-        logout();
-      } finally {
-        setLoading(false);
+        console.warn('Session verification warning:', err.message);
+        // Only log out if explicitly 401 Unauthorized (token invalid/expired)
+        if (err.status === 401 || err.data?.message?.toLowerCase().includes('expired')) {
+          logout();
+        }
       }
     };
 
