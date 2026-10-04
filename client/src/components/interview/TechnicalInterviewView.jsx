@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   createInterviewSession,
   startInterviewSession,
@@ -35,6 +35,8 @@ import {
   Code2,
   User as UserIcon,
   UserCheck,
+  Keyboard,
+  Edit3,
 } from 'lucide-react';
 
 const TechnicalInterviewView = ({
@@ -62,6 +64,7 @@ const TechnicalInterviewView = ({
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [questionIndex, setQuestionIndex] = useState(1);
   const [studentAnswer, setStudentAnswer] = useState('');
+  const [showTextInput, setShowTextInput] = useState(false);
   const [remainingSeconds, setRemainingSeconds] = useState(1200);
   const [submittingAnswer, setSubmittingAnswer] = useState(false);
   const [loadingQuestion, setLoadingQuestion] = useState(false);
@@ -86,6 +89,7 @@ const TechnicalInterviewView = ({
 
   const videoPreviewRef = useRef(null);
   const videoLiveRef = useRef(null);
+  const mediaStreamRef = useRef(null);
   const recognitionRef = useRef(null);
   const timerIntervalRef = useRef(null);
   const autoSubmitTimerRef = useRef(null);
@@ -106,6 +110,10 @@ const TechnicalInterviewView = ({
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const animationFrameRef = useRef(null);
+
+  useEffect(() => {
+    mediaStreamRef.current = mediaStream;
+  }, [mediaStream]);
 
   useEffect(() => {
     studentAnswerRef.current = studentAnswer;
@@ -229,6 +237,45 @@ const TechnicalInterviewView = ({
     };
   }, []);
 
+  // Safe helper to attach media stream to video element without resetting stream pipeline
+  const attachStreamToVideo = useCallback((videoEl, stream) => {
+    if (!videoEl || !stream) return;
+    if (videoEl.srcObject !== stream) {
+      videoEl.srcObject = stream;
+      videoEl.muted = true;
+      videoEl.playsInline = true;
+      videoEl.autoplay = true;
+      const playPromise = videoEl.play();
+      if (playPromise !== undefined) {
+        playPromise.catch((err) => {
+          console.warn('Video element play() notice:', err?.name);
+        });
+      }
+    }
+  }, []);
+
+  const setPreviewVideoRef = useCallback(
+    (el) => {
+      videoPreviewRef.current = el;
+      const stream = mediaStreamRef.current;
+      if (el && stream) {
+        attachStreamToVideo(el, stream);
+      }
+    },
+    [attachStreamToVideo]
+  );
+
+  const setLiveVideoRef = useCallback(
+    (el) => {
+      videoLiveRef.current = el;
+      const stream = mediaStreamRef.current;
+      if (el && stream) {
+        attachStreamToVideo(el, stream);
+      }
+    },
+    [attachStreamToVideo]
+  );
+
   const startAudioVisualizer = (stream) => {
     if (!stream) return;
     const audioTrack = stream.getAudioTracks()[0];
@@ -251,8 +298,10 @@ const TechnicalInterviewView = ({
       analyserRef.current = analyser;
 
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      let lastUpdateTime = 0;
+      let lastVol = 0;
 
-      const checkVolume = () => {
+      const checkVolume = (timestamp) => {
         if (!analyserRef.current) return;
         analyserRef.current.getByteFrequencyData(dataArray);
         let sum = 0;
@@ -261,11 +310,19 @@ const TechnicalInterviewView = ({
         }
         const avg = sum / dataArray.length;
         const normalized = Math.min(100, Math.round((avg / 128) * 100));
-        setAudioLevel(normalized);
+
+        // Throttle state updates to 100ms and significant changes to avoid 60 FPS whole-component re-renders
+        if (!lastUpdateTime || timestamp - lastUpdateTime >= 100) {
+          if (Math.abs(normalized - lastVol) >= 4 || (normalized === 0 && lastVol !== 0)) {
+            lastVol = normalized;
+            lastUpdateTime = timestamp;
+            setAudioLevel(normalized);
+          }
+        }
         animationFrameRef.current = requestAnimationFrame(checkVolume);
       };
 
-      checkVolume();
+      animationFrameRef.current = requestAnimationFrame(checkVolume);
     } catch (e) {
       console.warn('AudioContext sound meter init error:', e);
     }
@@ -283,8 +340,10 @@ const TechnicalInterviewView = ({
 
   const stopMediaStream = () => {
     stopAudioVisualizer();
-    if (mediaStream) {
-      mediaStream.getTracks().forEach((track) => track.stop());
+    const stream = mediaStreamRef.current || mediaStream;
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
       setMediaStream(null);
       setCameraReady(false);
       setMicReady(false);
@@ -293,6 +352,19 @@ const TechnicalInterviewView = ({
 
   // Initialize camera and mic with fallback constraints & sound meter
   const initMediaCheck = async () => {
+    // If we already have an active stream with live tracks, reuse it without requesting hardware lock again
+    if (
+      mediaStreamRef.current &&
+      mediaStreamRef.current.active &&
+      mediaStreamRef.current.getVideoTracks().some((t) => t.readyState === 'live')
+    ) {
+      setCameraReady(true);
+      setMicReady(true);
+      attachStreamToVideo(videoPreviewRef.current, mediaStreamRef.current);
+      attachStreamToVideo(videoLiveRef.current, mediaStreamRef.current);
+      return mediaStreamRef.current;
+    }
+
     setMediaError(null);
     try {
       let stream = null;
@@ -317,20 +389,13 @@ const TechnicalInterviewView = ({
         });
       }
 
+      mediaStreamRef.current = stream;
       setMediaStream(stream);
       setCameraReady(true);
       setMicReady(true);
 
-      if (videoPreviewRef.current) {
-        videoPreviewRef.current.srcObject = stream;
-        videoPreviewRef.current.muted = true;
-        videoPreviewRef.current.play().catch(() => {});
-      }
-      if (videoLiveRef.current) {
-        videoLiveRef.current.srcObject = stream;
-        videoLiveRef.current.muted = true;
-        videoLiveRef.current.play().catch(() => {});
-      }
+      attachStreamToVideo(videoPreviewRef.current, stream);
+      attachStreamToVideo(videoLiveRef.current, stream);
 
       startAudioVisualizer(stream);
       return stream;
@@ -338,6 +403,7 @@ const TechnicalInterviewView = ({
       console.warn('Media devices not fully accessible:', err.name, err.message);
       try {
         const audioOnly = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaStreamRef.current = audioOnly;
         setMediaStream(audioOnly);
         setMicReady(true);
         setCameraReady(false);
@@ -354,59 +420,22 @@ const TechnicalInterviewView = ({
     }
   };
 
-  const setPreviewVideoRef = (el) => {
-    videoPreviewRef.current = el;
-    if (el && mediaStream) {
-      el.srcObject = mediaStream;
-      el.muted = true;
-      el.play().catch(() => {});
-    }
-  };
-
-  const setLiveVideoRef = (el) => {
-    videoLiveRef.current = el;
-    if (el && mediaStream) {
-      el.srcObject = mediaStream;
-      el.muted = true;
-      el.play().catch(() => {});
-    }
-  };
-
   // Re-attach media stream to active video elements when state changes
   useEffect(() => {
-    let isMounted = true;
-    const attachMedia = async () => {
-      let activeStream = mediaStream;
-      if (!activeStream || !activeStream.active || activeStream.getTracks().length === 0) {
-        activeStream = await initMediaCheck();
-      }
-      if (isMounted && activeStream) {
-        if (videoPreviewRef.current) {
-          videoPreviewRef.current.srcObject = activeStream;
-          videoPreviewRef.current.muted = true;
-          videoPreviewRef.current.play().catch(() => {});
-        }
-        if (videoLiveRef.current) {
-          videoLiveRef.current.srcObject = activeStream;
-          videoLiveRef.current.muted = true;
-          videoLiveRef.current.play().catch(() => {});
-        }
-      }
-    };
-
     if (viewState === 'interview' || viewState === 'check') {
-      attachMedia();
+      const activeStream = mediaStreamRef.current || mediaStream;
+      if (activeStream && activeStream.active) {
+        attachStreamToVideo(videoPreviewRef.current, activeStream);
+        attachStreamToVideo(videoLiveRef.current, activeStream);
+      }
     }
-
-    return () => {
-      isMounted = false;
-    };
-  }, [viewState, mediaStream, videoMode]);
+  }, [viewState, videoMode, mediaStream, attachStreamToVideo]);
 
   // Handle hardware / physical mic mute on headset
   useEffect(() => {
-    if (!mediaStream) return;
-    const audioTracks = mediaStream.getAudioTracks();
+    const stream = mediaStreamRef.current || mediaStream;
+    if (!stream) return;
+    const audioTracks = stream.getAudioTracks();
     const handlePhysicalMute = () => {
       const currentAns = (studentAnswerRef.current || studentAnswer || '').trim();
       if (currentAns && !isSubmittingRef.current && !isLoadingQuestionRef.current) {
@@ -425,7 +454,13 @@ const TechnicalInterviewView = ({
     };
   }, [mediaStream]);
 
-  // Speech Recognition Setup (Web Speech API) with continuous listening & generous 4.5s quiet window
+  const cancelAutoSubmit = useCallback(() => {
+    if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
+    if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    setAutoSubmitCountdown(null);
+  }, []);
+
+  // Speech Recognition Setup (Web Speech API) with continuous listening & patient 10s quiet window
   const initSpeechRecognition = () => {
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -438,73 +473,83 @@ const TechnicalInterviewView = ({
       recognition.lang = navigator.language || 'en-US';
 
       recognition.onresult = (event) => {
-        let currentChunk = '';
-        for (let i = 0; i < event.results.length; i++) {
-          currentChunk += event.results[i][0].transcript + ' ';
-        }
-        const cleaned = (accumulatedTranscriptRef.current + ' ' + currentChunk).trim();
-        if (cleaned) {
-          setStudentAnswer(cleaned);
-          studentAnswerRef.current = cleaned;
+        let interimTranscript = '';
+        let finalTranscript = '';
 
-          const lower = cleaned.toLowerCase();
-          const isDontKnow =
-            lower.includes("don't know") ||
-            lower.includes('dont know') ||
-            lower.includes('do not know') ||
-            lower.includes('not getting') ||
-            lower.includes('no idea') ||
-            lower.includes('not sure') ||
-            lower.includes('pass') ||
-            lower.includes('skip') ||
-            lower.includes('next question');
-
-          // Reset previous silence timers
-          if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
-          if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
-
-          if (isDontKnow) {
-            setAutoSubmitCountdown(1);
-            autoSubmitTimerRef.current = setTimeout(() => {
-              setAutoSubmitCountdown(null);
-              triggerAutoSubmit(studentAnswerRef.current || cleaned);
-            }, 800);
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          const item = event.results[i];
+          if (item.isFinal) {
+            finalTranscript += item[0].transcript + ' ';
           } else {
-            // Generous silence detection: 4.5s of sustained quiet lets candidate formulate multi-sentence technical answers
-            let secsLeft = 4;
-            setAutoSubmitCountdown(secsLeft);
-            countdownIntervalRef.current = setInterval(() => {
-              secsLeft -= 1;
-              if (secsLeft <= 0) {
-                clearInterval(countdownIntervalRef.current);
-              } else {
-                setAutoSubmitCountdown(secsLeft);
-              }
-            }, 1000);
-
-            autoSubmitTimerRef.current = setTimeout(() => {
-              clearInterval(countdownIntervalRef.current);
-              setAutoSubmitCountdown(null);
-              triggerAutoSubmit(studentAnswerRef.current || cleaned);
-            }, 4500);
+            interimTranscript += item[0].transcript;
           }
+        }
+
+        if (finalTranscript) {
+          accumulatedTranscriptRef.current = (
+            (accumulatedTranscriptRef.current ? accumulatedTranscriptRef.current + ' ' : '') + finalTranscript
+          ).replace(/\s+/g, ' ').trim();
+        }
+
+        const combined = (
+          (accumulatedTranscriptRef.current ? accumulatedTranscriptRef.current + ' ' : '') + interimTranscript
+        ).replace(/\s+/g, ' ').trim();
+
+        if (combined) {
+          setStudentAnswer(combined);
+          studentAnswerRef.current = combined;
+        }
+
+        // Reset any existing silence timer while candidate is speaking
+        if (autoSubmitTimerRef.current) clearTimeout(autoSubmitTimerRef.current);
+        if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+        setAutoSubmitCountdown(null);
+
+        // Generous silence detection: Only initiate after student has spoken a meaningful response (>= 12 words)
+        // Never cut off the candidate after just 1 or 2 words
+        const wordCount = (combined || '').split(/\s+/).filter(Boolean).length;
+        if (wordCount >= 12) {
+          let secsLeft = 10;
+          setAutoSubmitCountdown(secsLeft);
+          countdownIntervalRef.current = setInterval(() => {
+            secsLeft -= 1;
+            if (secsLeft <= 0) {
+              clearInterval(countdownIntervalRef.current);
+            } else {
+              setAutoSubmitCountdown(secsLeft);
+            }
+          }, 1000);
+
+          autoSubmitTimerRef.current = setTimeout(() => {
+            clearInterval(countdownIntervalRef.current);
+            setAutoSubmitCountdown(null);
+            triggerAutoSubmit(studentAnswerRef.current || combined);
+          }, 10000);
         }
       };
 
       recognition.onerror = (event) => {
-        if (event.error === 'no-speech') {
-          // Normal pause in speech, keep listening smoothly
+        if (event.error === 'no-speech' || event.error === 'audio-capture') {
           return;
         }
         console.warn('Speech recognition notice:', event.error);
       };
 
       recognition.onend = () => {
-        if (shouldListenRef.current && !isAiSpeakingRef.current && !isSubmittingRef.current && !isLoadingQuestionRef.current) {
-          accumulatedTranscriptRef.current = studentAnswerRef.current;
+        if (
+          shouldListenRef.current &&
+          !isAiSpeakingRef.current &&
+          !isSubmittingRef.current &&
+          !isLoadingQuestionRef.current
+        ) {
           if (restartSpeechTimeoutRef.current) clearTimeout(restartSpeechTimeoutRef.current);
           restartSpeechTimeoutRef.current = setTimeout(() => {
-            if (shouldListenRef.current && !isAiSpeakingRef.current && !isSubmittingRef.current && !isLoadingQuestionRef.current) {
+            if (
+              shouldListenRef.current &&
+              !isAiSpeakingRef.current &&
+              !isSubmittingRef.current &&
+              !isLoadingQuestionRef.current
+            ) {
               startSpeechRecognition();
             }
           }, 200);
@@ -525,8 +570,9 @@ const TechnicalInterviewView = ({
     if (isAiSpeakingRef.current || isSubmittingRef.current || isLoadingQuestionRef.current) return;
     shouldListenRef.current = true;
 
-    if (mediaStream) {
-      mediaStream.getAudioTracks().forEach((track) => {
+    const stream = mediaStreamRef.current || mediaStream;
+    if (stream) {
+      stream.getAudioTracks().forEach((track) => {
         track.enabled = true;
       });
     }
@@ -565,10 +611,11 @@ const TechnicalInterviewView = ({
   };
 
   const toggleSpeechRecognition = async () => {
+    const stream = mediaStreamRef.current || mediaStream;
     if (isListening) {
       stopSpeechRecognition();
-      if (mediaStream) {
-        mediaStream.getAudioTracks().forEach((track) => {
+      if (stream) {
+        stream.getAudioTracks().forEach((track) => {
           track.enabled = false;
         });
       }
@@ -578,8 +625,8 @@ const TechnicalInterviewView = ({
         await triggerAutoSubmit(currentAns);
       }
     } else {
-      if (mediaStream) {
-        mediaStream.getAudioTracks().forEach((track) => {
+      if (stream) {
+        stream.getAudioTracks().forEach((track) => {
           track.enabled = true;
         });
       }
@@ -918,7 +965,10 @@ const TechnicalInterviewView = ({
           {/* Mode Switcher Buttons */}
           <div className="flex items-center p-1 bg-slate-900 border border-slate-800 rounded-2xl shrink-0">
             <button
-              onClick={() => setSelectedInterviewType('technical')}
+              onClick={() => {
+                setSelectedInterviewType('technical');
+                setHistoryFilter('technical');
+              }}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 ${
                 !isHrLanding
                   ? 'bg-brand-600 text-white shadow-lg shadow-brand-500/20'
@@ -929,7 +979,10 @@ const TechnicalInterviewView = ({
               <span>Technical Interview</span>
             </button>
             <button
-              onClick={() => setSelectedInterviewType('hr')}
+              onClick={() => {
+                setSelectedInterviewType('hr');
+                setHistoryFilter('hr');
+              }}
               className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center space-x-2 ${
                 isHrLanding
                   ? 'bg-emerald-600 text-white shadow-lg shadow-emerald-500/20'
@@ -1086,7 +1139,13 @@ const TechnicalInterviewView = ({
           ) : filteredHistory.length === 0 ? (
             <div className="glass-panel p-10 rounded-2xl border border-slate-800 text-center space-y-3">
               <Video className="w-10 h-10 text-slate-600 mx-auto" />
-              <h3 className="text-sm font-semibold text-slate-300">No {historyFilter !== 'all' ? historyFilter.toUpperCase() : ''} mock interviews taken yet</h3>
+              <h3 className="text-sm font-semibold text-slate-300">
+                {historyFilter === 'hr'
+                  ? 'No HR mock interviews taken yet'
+                  : historyFilter === 'technical'
+                  ? 'No Technical mock interviews taken yet'
+                  : 'No mock interviews taken yet'}
+              </h3>
               <p className="text-xs text-slate-500 max-w-sm mx-auto">
                 Ready to prepare? Click <strong>Take {isHrLanding ? 'HR' : 'Technical'} Mock Interview</strong> above to begin your 20-minute session.
               </p>
@@ -1197,11 +1256,11 @@ const TechnicalInterviewView = ({
             </h3>
             <div className="w-full aspect-video bg-slate-950 rounded-2xl overflow-hidden border border-slate-800 relative flex items-center justify-center">
               <video
-                ref={videoPreviewRef}
+                ref={setPreviewVideoRef}
                 autoPlay
                 playsInline
                 muted
-                className={`w-full h-full object-cover ${!cameraReady ? 'hidden' : ''}`}
+                className={`w-full h-full object-cover -scale-x-100 ${!cameraReady ? 'hidden' : ''}`}
               />
               {!cameraReady && (
                 <div className="text-center p-6 space-y-2 text-slate-500">
@@ -1280,17 +1339,20 @@ const TechnicalInterviewView = ({
   // =========================================================================
   if (viewState === 'interview') {
     const isCriticalTime = remainingSeconds <= 120; // Last 2 minutes
+    const isHrSession = currentSession?.interviewType === 'hr' || selectedInterviewType === 'hr';
 
     return (
       <div className="space-y-5 max-w-6xl mx-auto pb-10">
         {/* Top Bar: Title on Left, 20:00 Timer on Right */}
         <div className="flex items-center justify-between bg-slate-950/80 border border-slate-800 px-6 py-3.5 rounded-2xl">
           <div className="flex items-center space-x-3">
-            <div className="p-1.5 bg-brand-600/20 text-brand-400 rounded-lg">
+            <div className={`p-1.5 rounded-lg ${isHrSession ? 'bg-emerald-600/20 text-emerald-400' : 'bg-brand-600/20 text-brand-400'}`}>
               <Bot className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-white">Technical Interview</h2>
+              <h2 className="text-sm font-bold text-white">
+                {isHrSession ? 'HR Behavioral Mock Interview' : 'Technical Mock Interview'}
+              </h2>
               <p className="text-[11px] text-slate-400">
                 Mock #{currentSession?.attemptNumber || 1} • {companyName || 'Target Company'}
               </p>
@@ -1403,11 +1465,11 @@ const TechnicalInterviewView = ({
               </div>
             </div>
 
-            {/* AI Technical Interviewer Pane */}
+            {/* AI Technical / HR Interviewer Pane */}
             <div className="relative aspect-video md:aspect-[4/3] rounded-3xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl flex items-center justify-center group">
               <img
                 src="/ai_interviewer.jpg"
-                alt="AI Technical Interviewer"
+                alt={isHrSession ? 'AI HR Interviewer' : 'AI Technical Interviewer'}
                 className={`w-full h-full object-cover object-center transition-all duration-700 ${
                   isAiSpeaking ? 'scale-[1.02] filter brightness-105' : 'scale-100'
                 }`}
@@ -1415,7 +1477,7 @@ const TechnicalInterviewView = ({
               <div className="absolute top-3 left-3 z-10 flex items-center space-x-2">
                 <div className="px-3 py-1 rounded-full bg-slate-950/85 backdrop-blur-md border border-slate-700/80 text-white text-[11px] font-bold flex items-center space-x-1.5 shadow-xl">
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                  <span>AI Interviewer • Tech Lead</span>
+                  <span>{isHrSession ? 'AI Interviewer • HR Director' : 'AI Interviewer • Tech Lead'}</span>
                 </div>
                 {isAiSpeaking && (
                   <div className="px-2.5 py-1 rounded-full bg-emerald-500/25 backdrop-blur-md border border-emerald-500/40 text-emerald-300 text-[10px] font-extrabold flex items-center space-x-1 animate-pulse">
@@ -1429,7 +1491,7 @@ const TechnicalInterviewView = ({
               <div className="absolute bottom-3 left-3 right-3 z-10 p-3 rounded-2xl bg-slate-950/90 backdrop-blur-md border border-slate-700/70 text-xs">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-[10px] font-extrabold text-brand-400 uppercase tracking-wider">
-                    Question #{questionIndex} • {currentQuestion?.topic || 'Assessment'}
+                    Question #{questionIndex} • {currentQuestion?.topic || (isHrSession ? 'Behavioral Assessment' : 'Technical Assessment')}
                   </span>
                 </div>
                 <p className="text-xs font-semibold text-white line-clamp-2 leading-relaxed">
@@ -1443,7 +1505,7 @@ const TechnicalInterviewView = ({
           <div className="relative w-full aspect-video sm:aspect-[16/9] min-h-[460px] max-h-[620px] rounded-3xl overflow-hidden border border-slate-800 bg-slate-950 shadow-2xl flex items-center justify-center">
             <img
               src="/ai_interviewer.jpg"
-              alt="AI Technical Interviewer"
+              alt={isHrSession ? 'AI HR Interviewer' : 'AI Technical Interviewer'}
               className={`w-full h-full object-cover object-center transition-all duration-700 ${
                 isAiSpeaking ? 'scale-[1.02] filter brightness-105' : 'scale-100'
               }`}
@@ -1451,7 +1513,7 @@ const TechnicalInterviewView = ({
             <div className="absolute top-4 left-4 z-10 flex items-center space-x-2 pointer-events-none">
               <div className="px-3.5 py-1.5 rounded-full bg-slate-950/85 backdrop-blur-md border border-slate-700/80 text-white text-xs font-bold flex items-center space-x-2 shadow-xl">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span>AI Interviewer • Tech Lead</span>
+                <span>{isHrSession ? 'AI Interviewer • HR Director' : 'AI Interviewer • Tech Lead'}</span>
               </div>
             </div>
 
@@ -1484,7 +1546,7 @@ const TechnicalInterviewView = ({
                     <span className="px-2 py-0.5 rounded-md bg-brand-500/20 border border-brand-500/30">
                       Question #{questionIndex}
                     </span>
-                    <span>• {currentQuestion?.topic || 'Technical Assessment'}</span>
+                    <span>• {currentQuestion?.topic || (isHrSession ? 'Behavioral Assessment' : 'Technical Assessment')}</span>
                   </span>
                 </div>
                 <p className="text-sm sm:text-base font-semibold text-white leading-relaxed">
@@ -1531,9 +1593,19 @@ const TechnicalInterviewView = ({
                     </div>
                   </div>
                   {autoSubmitCountdown && (
-                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/40 animate-pulse">
-                      ⚡ Silence detected — auto-advancing in {autoSubmitCountdown}s...
-                    </span>
+                    <div className="flex items-center space-x-2">
+                      <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/40 animate-pulse">
+                        ⚡ Silence detected — auto-advancing in {autoSubmitCountdown}s...
+                      </span>
+                      <button
+                        type="button"
+                        onClick={cancelAutoSubmit}
+                        className="px-2.5 py-0.5 rounded-full bg-amber-500/30 hover:bg-amber-500/50 text-amber-200 text-[10px] font-bold border border-amber-400/40 transition shadow-sm"
+                        title="Pause auto-advance timer and keep speaking"
+                      >
+                        Keep Speaking / Pause
+                      </button>
+                    </div>
                   )}
                 </div>
                 <p className="text-xs text-slate-400 mt-0.5">
@@ -1551,7 +1623,22 @@ const TechnicalInterviewView = ({
             </div>
 
             {/* Quick Actions: Submit, Pass & Mic Toggle */}
-            <div className="flex items-center space-x-2.5">
+            <div className="flex items-center space-x-2.5 flex-wrap gap-y-2">
+              {/* Type / Edit Response Toggle */}
+              <button
+                type="button"
+                onClick={() => setShowTextInput(!showTextInput)}
+                className={`px-3 py-2.5 rounded-xl text-xs font-semibold border transition flex items-center space-x-1.5 ${
+                  showTextInput
+                    ? 'bg-brand-600/30 text-brand-300 border-brand-500/50'
+                    : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+                }`}
+                title="Type or edit your response using the keyboard"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>{showTextInput ? 'Hide Typing' : 'Type / Edit'}</span>
+              </button>
+
               {/* Explicit Submit Answer Button */}
               {studentAnswer.trim().length > 0 && (
                 <button
@@ -1637,13 +1724,68 @@ const TechnicalInterviewView = ({
 
             {/* Animated auto-advance progress indicator */}
             {autoSubmitCountdown && (
-              <div className="w-full bg-slate-900 rounded-full h-1 overflow-hidden">
-                <div className="bg-gradient-to-r from-brand-500 to-emerald-400 h-full w-full animate-[pulse_0.9s_ease-in-out_infinite]" />
+              <div className="space-y-2 pt-1">
+                <div className="flex items-center justify-between p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs">
+                  <span className="flex items-center space-x-2">
+                    <Clock className="w-4 h-4 animate-spin text-amber-400" />
+                    <span>Candidate pause detected — auto-advancing in <strong>{autoSubmitCountdown}s</strong></span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={cancelAutoSubmit}
+                    className="px-3 py-1 rounded-lg bg-amber-500/30 hover:bg-amber-500/50 text-white font-bold text-[11px] transition border border-amber-400/40 shadow-sm"
+                  >
+                    Keep Speaking (Pause Timer)
+                  </button>
+                </div>
+                <div className="w-full bg-slate-900 rounded-full h-1 overflow-hidden">
+                  <div className="bg-gradient-to-r from-brand-500 to-emerald-400 h-full w-full animate-[pulse_0.9s_ease-in-out_infinite]" />
+                </div>
               </div>
             )}
           </div>
 
-          {/* Footer Controls: End Interview & Hands-Free Status (No Submit Button) */}
+          {/* Collapsible Keyboard Textarea & Submit */}
+          {showTextInput && (
+            <div className="p-4 rounded-2xl bg-slate-950/95 border border-slate-700/80 space-y-3">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-300 font-semibold flex items-center space-x-1.5">
+                  <Keyboard className="w-4 h-4 text-brand-400" />
+                  <span>Type or Edit Your Answer</span>
+                </span>
+                <span className="text-[11px] text-slate-400 font-mono">
+                  {studentAnswer.trim().split(/\s+/).filter(Boolean).length} words
+                </span>
+              </div>
+              <textarea
+                rows={3}
+                value={studentAnswer}
+                onChange={(e) => {
+                  setStudentAnswer(e.target.value);
+                  studentAnswerRef.current = e.target.value;
+                }}
+                placeholder={
+                  isHrSession
+                    ? 'Type your behavioral answer (STAR method: Situation, Task, Action, Result)...'
+                    : 'Type your technical answer, explain architecture, code mechanics, or trade-offs...'
+                }
+                className="w-full px-4 py-3 rounded-xl bg-slate-900/90 border border-slate-700 text-white text-xs placeholder:text-slate-500 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+              <div className="flex items-center justify-end space-x-2">
+                <button
+                  type="button"
+                  disabled={submittingAnswer || loadingQuestion || !studentAnswer.trim()}
+                  onClick={() => handleSubmitResponse(studentAnswer)}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition flex items-center space-x-1.5 shadow-md shadow-emerald-600/20 disabled:opacity-40"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Submit Written Answer</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Footer Controls: End Interview & Hands-Free Status */}
           <div className="flex items-center justify-between pt-1">
             <button
               type="button"
@@ -2077,19 +2219,23 @@ const TechnicalInterviewView = ({
         )}
 
         {/* Bottom Navigation Actions */}
-        <div className="pt-2 flex justify-between">
+        <div className="pt-2 flex justify-between items-center">
           <button
             onClick={() => setViewState('landing')}
             className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 rounded-xl text-xs font-semibold transition"
           >
-            ← Back to Technical Interview
+            ← Back to {isHrReport ? 'HR Interview' : 'Technical Interview'}
           </button>
 
           <button
-            onClick={handleTakeMockInterview}
-            className="px-8 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl text-xs font-bold shadow-lg shadow-brand-500/20 transition"
+            onClick={() => handleTakeMockInterview(isHrReport ? 'hr' : 'technical')}
+            className={`px-8 py-2.5 text-white rounded-xl text-xs font-bold shadow-lg transition ${
+              isHrReport
+                ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20'
+                : 'bg-brand-600 hover:bg-brand-500 shadow-brand-500/20'
+            }`}
           >
-            Take Another Mock Interview
+            Take Another {isHrReport ? 'HR Mock Interview' : 'Technical Mock Interview'}
           </button>
         </div>
       </div>

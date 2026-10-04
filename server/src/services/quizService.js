@@ -1,4 +1,4 @@
-const { getAIClient } = require('../config/aiConfig');
+const { getAIClient, GEMINI_MODEL } = require('../config/aiConfig');
 
 /**
  * Helper to clean and format skill names
@@ -69,7 +69,7 @@ Return ONLY a valid JSON array of 10 objects, with no markdown code blocks or su
 ]`;
 
       const response = await aiClient.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: GEMINI_MODEL,
         contents: prompt,
       });
 

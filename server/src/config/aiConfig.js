@@ -1,5 +1,7 @@
 const { GoogleGenAI } = require('@google/genai');
 
+const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+
 let aiInstance = null;
 
 const getAIClient = () => {
@@ -25,12 +27,13 @@ const checkAIStatus = () => {
   const isConfigured = Boolean(apiKey && apiKey.trim().length > 0);
   return {
     configured: isConfigured,
-    model: 'gemini-2.5-flash',
-    sdk: '@google/genai'
+    model: GEMINI_MODEL,
+    sdk: '@google/genai',
   };
 };
 
 module.exports = {
   getAIClient,
-  checkAIStatus
+  checkAIStatus,
+  GEMINI_MODEL,
 };
