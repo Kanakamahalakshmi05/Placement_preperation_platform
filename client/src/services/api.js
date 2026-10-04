@@ -103,8 +103,9 @@ export const deleteResume = async () => {
   return await api.delete('/resume/me');
 };
 
-export const fetchMockQuiz = async (difficulty = 'easy') => {
-  return await api.post('/quizzes/generate', { difficulty });
+export const fetchMockQuiz = async (difficulty = 'mixed', options = {}) => {
+  const payload = typeof difficulty === 'object' ? difficulty : { difficulty, count: 30, ...options };
+  return await api.post('/quizzes/generate', payload);
 };
 
 export const submitMockQuiz = async (payload) => {

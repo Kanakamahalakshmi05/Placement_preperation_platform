@@ -1,11 +1,13 @@
 require('dotenv').config();
 const dns = require('dns');
 
-// Configure DNS servers globally before any network operations
+// Configure DNS and SSL cert handling for local development/proxies
 try {
   dns.setServers(['8.8.8.8', '1.1.1.1']);
-} catch (e) {
-  // Ignore if already set
+} catch (e) {}
+
+if (process.env.NODE_ENV === 'development') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 }
 
 const http = require('http');

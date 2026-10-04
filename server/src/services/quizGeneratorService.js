@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const { getAIClient, GEMINI_MODEL } = require('../config/aiConfig');
 
 /**
  * Normalizes question text for robust deduplication and variation checking.
@@ -38,6 +39,94 @@ const calculateSimilarity = (textA, textB) => {
   const union = new Set([...setA, ...setB]).size;
   return union === 0 ? 0.0 : intersection / union;
 };
+
+/**
+ * Dynamically generates 30 distinct technical MCQ questions using Gemini AI
+ */
+async function generateGeminiAIQuizQuestions({
+  company = 'Target Company',
+  jobTitle = 'Software Engineer',
+  jdText = '',
+  matchedSkills = [],
+  missingSkills = [],
+  prioritizedSkills = [],
+  previousQuestions = [],
+  targetCount = 30,
+  diff = 'mixed',
+}) {
+  const aiClient = getAIClient();
+  if (!aiClient) return [];
+
+  try {
+    const recentAvoidList = previousQuestions
+      .slice(-30)
+      .map((q, idx) => `${idx + 1}. ${String(q).substring(0, 90)}`)
+      .join('\n');
+
+    const missingSkillList = missingSkills
+      .slice(0, 10)
+      .map((s) => (typeof s === 'object' ? s.skill : s))
+      .join(', ');
+
+    const prompt = `You are a Senior Technical Hiring Lead and Assessment Architect designing an on-demand technical practice exam for a candidate interviewing at ${company} for the role of ${jobTitle}.
+
+Target Job Requirements Excerpt:
+${jdText.substring(0, 1200)}
+
+Candidate's Required Skill Gaps to Test (HIGH PRIORITY):
+${missingSkillList || 'Core Backend & Frontend Engineering, Databases, System Design, Testing/QA'}
+
+Candidate's Target Skills:
+${prioritizedSkills.slice(0, 14).join(', ') || 'React, Node.js, SQL, AWS, Linux, System Design, DSA, Testing/QA'}
+
+AVOID THESE RECENTLY ASKED QUESTIONS (Strictly generate fresh, DIFFERENT questions):
+${recentAvoidList || 'None yet'}
+
+TASK:
+Generate EXACTLY ${targetCount} unique, high-quality, practical multiple-choice technical questions (MCQs) covering:
+1. Architecture, coding, and real-world implementation trade-offs
+2. Data structures, query optimization, indexing, and caching
+3. Concurrency, fault tolerance, API design, Linux fundamentals, and QA testing strategies
+4. Concepts directly mapped to the company's tech stack and JD skills.
+
+Rules:
+- Provide exactly 4 distinct, plausible options for each question.
+- Explicitly define the "correctAnswerIndex" (0, 1, 2, or 3).
+- Provide a clear, educational "explanation".
+- Set "difficulty" to one of ["easy", "medium", "difficult"].
+
+Return ONLY a valid JSON array of ${targetCount} objects with no markdown code blocks or surrounding text. Format:
+[
+  {
+    "topic": "Skill / Topic Name",
+    "question": "Question text here...",
+    "options": ["Option A", "Option B", "Option C", "Option D"],
+    "correctAnswerIndex": 0,
+    "explanation": "Why this answer is correct...",
+    "difficulty": "medium"
+  }
+]`;
+
+    const response = await aiClient.models.generateContent({
+      model: GEMINI_MODEL,
+      contents: prompt,
+    });
+
+    const responseText = response.text || '';
+    const cleanJson = responseText
+      .replace(/```json/gi, '')
+      .replace(/```/g, '')
+      .trim();
+
+    const parsed = JSON.parse(cleanJson);
+    if (Array.isArray(parsed) && parsed.length >= 10) {
+      return parsed;
+    }
+  } catch (err) {
+    console.warn('[QuizGeneratorService] Gemini AI generation notice:', err.message);
+  }
+  return [];
+}
 
 // ----------------------------------------------------------------------------
 // Curated Technical Question Bank for Common Engineering Disciplines
@@ -799,6 +888,196 @@ const SKILL_QUESTION_BANK = {
       },
     ],
   },
+
+  // =========================================================================
+  // CLOUD, SYSTEMS, DATABASES & TESTING
+  // =========================================================================
+  DynamoDB: {
+    easy: [
+      {
+        question: 'What type of database is Amazon DynamoDB and what is its primary data model?',
+        options: [
+          'A fully managed NoSQL key-value and document database providing single-digit millisecond latency at any scale',
+          'A relational database with foreign key constraints and SQL joins',
+          'A file storage system similar to NFS',
+          'An in-memory Redis cache replacement that requires manual sharding',
+        ],
+        correctAnswer: 0,
+        explanation: 'DynamoDB is a managed NoSQL database built for low-latency key-value and document queries.',
+        topic: 'DynamoDB Core Model',
+      },
+    ],
+    medium: [
+      {
+        question: 'In DynamoDB, what is the primary difference between a Partition Key (Hash Key) and a Composite Primary Key (Partition Key + Sort Key)?',
+        options: [
+          'Partition Key determines physical storage partition distribution, while the Sort Key allows range queries (`begins_with`, `between`, `<`) within that partition',
+          'Partition keys store encrypted passwords while sort keys store usernames',
+          'Partition keys are stored on disk while sort keys are stored in browser memory',
+          'There is no difference; they are exact aliases',
+        ],
+        correctAnswer: 0,
+        explanation: 'Partition keys determine partition hashing; sort keys organize items within the partition for range queries.',
+        topic: 'DynamoDB Primary Keys & Range Queries',
+      },
+    ],
+    difficult: [
+      {
+        question: 'Why should DynamoDB Global Secondary Indexes (GSI) be designed with sparse index patterns in mind?',
+        options: [
+          'Only items containing the GSI partition and sort key attributes are replicated into the index, saving write throughput and storage',
+          'Sparse indexes disable eventual consistency on read replicas',
+          'Sparse indexes convert DynamoDB tables into PostgreSQL tables automatically',
+          'Sparse indexes prevent tables from autoscaling',
+        ],
+        correctAnswer: 0,
+        explanation: 'DynamoDB only projects items into a GSI if the item contains the index key attributes (sparse indexing).',
+        topic: 'DynamoDB GSI Index Design',
+      },
+    ],
+  },
+
+  Linux: {
+    easy: [
+      {
+        question: 'In Linux / Unix, which command is used to display live process resource utilization, memory usage, and CPU load?',
+        options: ['top (or htop)', 'grep', 'mkdir', 'chmod'],
+        correctAnswer: 0,
+        explanation: '`top` and `htop` display real-time Linux processes and system resource statistics.',
+        topic: 'Linux Process Management',
+      },
+      {
+        question: 'What does the `chmod 755 filename` command do in Linux permissions?',
+        options: [
+          'Grants Read, Write, Execute (rwx) to the Owner, and Read & Execute (r-x) to Group and Others',
+          'Encrypts the file with AES-256',
+          'Deletes the file permanently',
+          'Changes the file owner to root',
+        ],
+        correctAnswer: 0,
+        explanation: '7 (rwx) for user, 5 (r-x) for group, 5 (r-x) for others.',
+        topic: 'Linux Permissions & Security',
+      },
+    ],
+    medium: [
+      {
+        question: 'How do standard Linux file descriptors `0`, `1`, and `2` map to stream channels?',
+        options: [
+          '0 = STDIN (Standard Input), 1 = STDOUT (Standard Output), 2 = STDERR (Standard Error)',
+          '0 = Root, 1 = User, 2 = Guest',
+          '0 = HTTP, 1 = HTTPS, 2 = SSH',
+          '0 = Read, 1 = Write, 2 = Execute',
+        ],
+        correctAnswer: 0,
+        explanation: 'Standard Unix file descriptors: 0 is standard input, 1 is standard output, and 2 is standard error.',
+        topic: 'Linux I/O Redirection & Streams',
+      },
+    ],
+    difficult: [
+      {
+        question: 'What is the purpose of the Linux `/proc` pseudo-filesystem in operating system architecture?',
+        options: [
+          'It provides a real-time virtual interface to kernel data structures, hardware info, and per-process memory metrics without consuming disk space',
+          'It stores boot sector binary images on the hard drive',
+          'It is a temporary directory that is emptied on every reboot',
+          'It acts as a swap space partition for virtual memory paging',
+        ],
+        correctAnswer: 0,
+        explanation: '`/proc` is an in-memory virtual filesystem generated by the kernel exposing system and process states.',
+        topic: 'Linux Kernel & Proc Filesystem',
+      },
+    ],
+  },
+
+  'System Design': {
+    easy: [
+      {
+        question: 'What is the fundamental difference between Horizontal Scaling (Scaling Out) and Vertical Scaling (Scaling Up)?',
+        options: [
+          'Horizontal scaling adds more machines/instances to the pool, while vertical scaling adds more CPU/RAM to a single existing server',
+          'Vertical scaling adds more network routers, while horizontal scaling adds fiber optic cables',
+          'Horizontal scaling is only possible with relational databases',
+          'Vertical scaling requires serverless architecture',
+        ],
+        correctAnswer: 0,
+        explanation: 'Scaling out adds more commodity server nodes behind a load balancer, providing virtually unlimited elasticity.',
+        topic: 'System Design Scaling Fundamentals',
+      },
+    ],
+    medium: [
+      {
+        question: 'According to the CAP Theorem, in the presence of a Network Partition (P), what trade-off must distributed data systems make?',
+        options: [
+          'Choose between Consistency (C) (all nodes return latest data or error) or Availability (A) (all nodes return responses though not guaranteed latest)',
+          'Choose between Security and Performance',
+          'Choose between SQL and NoSQL databases',
+          'Choose between HTTP/1.1 and HTTP/2',
+        ],
+        correctAnswer: 0,
+        explanation: 'When network partitions occur in distributed systems, a system must choose between Consistency (CP) and Availability (AP).',
+        topic: 'Distributed Systems & CAP Theorem',
+      },
+    ],
+    difficult: [
+      {
+        question: 'How does Consistent Hashing minimize data movement when caching nodes or database shards are dynamically added or removed?',
+        options: [
+          'By mapping both keys and servers to a virtual ring hash space ($0$ to $2^{32}-1$), so node addition/removal only relocates $K/N$ keys on average',
+          'By broadcasting every read request to all nodes concurrently',
+          'By keeping all keys in a central Redis master instance',
+          'By sorting keys in alphabetical order across disks',
+        ],
+        correctAnswer: 0,
+        explanation: 'Consistent hashing bounds key redistribution to $K/N$ keys rather than reshuffling all keys ($K$).',
+        topic: 'Consistent Hashing & Partitioning',
+      },
+    ],
+  },
+
+  'Testing/QA': {
+    easy: [
+      {
+        question: 'What is the core distinction between Unit Testing and Integration Testing in software engineering?',
+        options: [
+          'Unit tests verify individual isolated functions/modules in memory, while integration tests verify cross-module communication and database/network interactions',
+          'Unit tests are performed manually by QA engineers while integration tests are run by end users',
+          'Integration tests only test CSS visual styles',
+          'Unit tests cannot test asynchronous JavaScript promises',
+        ],
+        correctAnswer: 0,
+        explanation: 'Unit tests isolate specific logic units; integration tests validate multiple collaborating components.',
+        topic: 'Testing Hierarchy & Unit Testing',
+      },
+    ],
+    medium: [
+      {
+        question: 'In Test-Driven Development (TDD), what is the correct sequence of the "Red-Green-Refactor" cycle?',
+        options: [
+          '1. Write a failing test (Red), 2. Write minimal code to pass the test (Green), 3. Clean and optimize the code (Refactor)',
+          '1. Refactor production code, 2. Deploy to staging, 3. Write unit tests if errors occur',
+          '1. Write documentation, 2. Write all tests, 3. Delete failing tests',
+          '1. Ship to production (Green), 2. Wait for user bugs (Red), 3. Refactor',
+        ],
+        correctAnswer: 0,
+        explanation: 'TDD follows Red (fail test), Green (pass test with simplest code), and Refactor (improve design).',
+        topic: 'Test-Driven Development (TDD)',
+      },
+    ],
+    difficult: [
+      {
+        question: 'What is the primary objective of Chaos Engineering and automated fault injection in production microservices?',
+        options: [
+          'To proactively uncover systemic weaknesses and verify resiliency mechanisms (circuit breakers, fallbacks) before natural production outages occur',
+          'To test if load balancers can handle corrupted TCP packets',
+          'To format database disks in staging environments',
+          'To test server physical hardware temperatures',
+        ],
+        correctAnswer: 0,
+        explanation: 'Chaos Engineering builds confidence in a distributed system’s capability to withstand turbulent production conditions.',
+        topic: 'Resilience Testing & Chaos Engineering',
+      },
+    ],
+  },
 };
 
 // ----------------------------------------------------------------------------
@@ -880,30 +1159,273 @@ const SCENARIO_GENERATORS = [
       topic: `${skill} Architecture & Scalability`,
     }),
   },
+  {
+    type: 'caching',
+    make: (skill, diff, uid) => ({
+      question: `When optimizing high-throughput read paths in a ${skill} system, how does the Cache-Aside pattern prevent stale database reads? [Ref: ${uid}]`,
+      options: [
+        'The application reads from cache first; on cache miss, it loads from DB, populates the cache with a defined TTL, and explicitly invalidates on write updates',
+        'It writes all records to local disk files before database commits',
+        'It queries the database every 10 milliseconds in a polling background worker',
+        'It converts all queries into HTTP GET requests',
+      ],
+      correctAnswer: 0,
+      explanation: 'Cache-aside loads data on demand and pairs TTL expiration with explicit write-invalidation.',
+      topic: `${skill} Caching & Performance`,
+    }),
+  },
+  {
+    type: 'data_integrity',
+    make: (skill, diff, uid) => ({
+      question: `In a distributed transaction involving ${skill}, what mechanism guarantees that duplicate network requests do not result in double execution? [Ref: ${uid}]`,
+      options: [
+        'Idempotency Keys stored with unique constraints in a transactional store',
+        'Randomizing request timestamps on the client',
+        'Ignoring HTTP POST responses and proceeding immediately',
+        'Increasing connection pool sizes to infinity',
+      ],
+      correctAnswer: 0,
+      explanation: 'Idempotency keys ensure identical operations can be safely retried without unintended side-effects.',
+      topic: `${skill} Data Integrity & Idempotency`,
+    }),
+  },
+  {
+    type: 'database_indexing',
+    make: (skill, diff, uid) => ({
+      question: `When querying large datasets in ${skill}, why does creating composite indexes with appropriate column ordering dramatically reduce query latency? [Ref: ${uid}]`,
+      options: [
+        'It allows B-tree index traversal matching the query WHERE filter and sort order directly, eliminating expensive full table scans',
+        'It compresses all database rows into a single zip file in memory',
+        'It bypasses operating system security policies',
+        'It enables asynchronous execution on client GPUs',
+      ],
+      correctAnswer: 0,
+      explanation: 'Composite indexes provide direct tree lookups matching equality and range filters in order.',
+      topic: `${skill} Database & Indexing Strategy`,
+    }),
+  },
+  {
+    type: 'error_handling',
+    make: (skill, diff, uid) => ({
+      question: `What is the recommended design practice in ${skill} for handling unexpected runtime errors without crashing the main service thread? [Ref: ${uid}]`,
+      options: [
+        'Centralized error-handling middleware, structured error logging, and graceful process degradation with health checks',
+        'Catching errors with empty try/catch blocks and silently ignoring all failures',
+        'Terminating the operating system immediately upon any warning',
+        'Sending all error stack traces directly to untrusted client browsers',
+      ],
+      correctAnswer: 0,
+      explanation: 'Centralized error filters log diagnostics safely and ensure clean status codes and graceful degradation.',
+      topic: `${skill} Error Handling & Reliability`,
+    }),
+  },
+  {
+    type: 'testing_strategy',
+    make: (skill, diff, uid) => ({
+      question: `When writing automated integration tests for a ${skill} service, what is the best practice for isolating third-party external APIs? [Ref: ${uid}]`,
+      options: [
+        'Mocking external network boundaries using test doubles or mock HTTP servers with realistic response payloads',
+        'Calling live third-party production endpoints on every commit test run',
+        'Disabling test assertions in CI/CD pipelines',
+        'Testing only happy-path scenarios without failure cases',
+      ],
+      correctAnswer: 0,
+      explanation: 'Mocking external boundaries guarantees fast, deterministic test suites without external flakiness.',
+      topic: `${skill} Testing & Quality Assurance`,
+    }),
+  },
+  {
+    type: 'acid_transactions',
+    make: (skill, diff, uid) => ({
+      question: `When executing critical transactional writes in a ${skill} application, which isolation level provides the strongest guarantee against dirty reads, non-repeatable reads, and phantom reads? [Ref: ${uid}]`,
+      options: [
+        'Serializable',
+        'Read Uncommitted',
+        'Read Committed',
+        'Repeatable Read without predicate locks',
+      ],
+      correctAnswer: 0,
+      explanation: 'Serializable isolation provides the strictest consistency by completely isolating concurrent transaction execution.',
+      topic: `${skill} ACID Transactions & Isolation`,
+    }),
+  },
+  {
+    type: 'rate_limiting',
+    make: (skill, diff, uid) => ({
+      question: `To protect a public ${skill} API endpoint against burst traffic spikes while maintaining steady throughput, which rate-limiting algorithm is most suitable? [Ref: ${uid}]`,
+      options: [
+        'Token Bucket algorithm with configurable bucket capacity and constant refill rate',
+        'Fixed Window Counter with immediate reset on every request',
+        'Disabling HTTP status code 429 Too Many Requests',
+        'Blocking all client IP addresses on high CPU utilization',
+      ],
+      correctAnswer: 0,
+      explanation: 'Token bucket smoothly handles temporary burst traffic while enforcing average rate ceilings over time.',
+      topic: `${skill} Rate Limiting & API Protection`,
+    }),
+  },
+  {
+    type: 'distributed_locking',
+    make: (skill, diff, uid) => ({
+      question: `When synchronizing critical resource execution across multiple distributed instances in a ${skill} microservices environment, what mechanism ensures mutual exclusion with auto-recovery on node crashes? [Ref: ${uid}]`,
+      options: [
+        'Distributed lock manager (e.g. Redlock or etcd/Consul leases) with time-to-live (TTL) and heartbeat renewers',
+        'Local in-memory mutex variable on one container instance',
+        'Sleep timers on client web applications',
+        'Ignoring concurrent execution conflicts',
+      ],
+      correctAnswer: 0,
+      explanation: 'Distributed leases with TTL prevent deadlocks if the lock holder fails before releasing.',
+      topic: `${skill} Distributed Locking & Consensus`,
+    }),
+  },
+  {
+    type: 'memory_profiling',
+    make: (skill, diff, uid) => ({
+      question: `When investigating an escalating heap memory leak in a long-running production ${skill} server, what is the most reliable debugging workflow? [Ref: ${uid}]`,
+      options: [
+        'Capturing differential heap snapshots over time to identify retained objects that fail garbage collection',
+        'Increasing physical server RAM without inspecting code',
+        'Restarting the server automatically every 5 minutes',
+        'Disabling garbage collection in the runtime flags',
+      ],
+      correctAnswer: 0,
+      explanation: 'Heap snapshot diffs pinpoint growing retainers and uncleared object references.',
+      topic: `${skill} Memory Management & Profiling`,
+    }),
+  },
+  {
+    type: 'rest_idempotency',
+    make: (skill, diff, uid) => ({
+      question: `According to standard RESTful API conventions in ${skill}, which set of HTTP methods must be implemented as strictly idempotent? [Ref: ${uid}]`,
+      options: [
+        'GET, PUT, DELETE, and HEAD',
+        'POST and PATCH only',
+        'POST, CONNECT, and TRACE only',
+        'No HTTP methods are idempotent by definition',
+      ],
+      correctAnswer: 0,
+      explanation: 'Idempotent methods produce the exact same server state regardless of whether they are executed once or multiple times.',
+      topic: `${skill} RESTful Architecture & Idempotency`,
+    }),
+  },
+  {
+    type: 'linux_signals',
+    make: (skill, diff, uid) => ({
+      question: `When running a containerized ${skill} service on Linux, which OS signal should the application handle to gracefully drain in-flight requests before terminating? [Ref: ${uid}]`,
+      options: [
+        'SIGTERM (Signal 15) to trigger graceful server drain and cleanup before SIGKILL (Signal 9) force-kills the process',
+        'SIGKILL directly to terminate all threads instantly',
+        'SIGSTOP to pause background tasks indefinitely',
+        'SIGHUP to restart the operating system kernel',
+      ],
+      correctAnswer: 0,
+      explanation: 'SIGTERM notifies applications to stop accepting new requests, finish active workloads, and close database connections cleanly.',
+      topic: `${skill} Linux Process Signals & Lifecycle`,
+    }),
+  },
+  {
+    type: 'git_branching',
+    make: (skill, diff, uid) => ({
+      question: `In modern engineering workflows using ${skill}, what is the primary benefit of rebasing feature branches against main before opening a pull request? [Ref: ${uid}]`,
+      options: [
+        'It produces a clean, linear commit history that simplifies code reviews and git bisect debugging',
+        'It compresses all Git files to zero bytes on disk',
+        'It automatically approves all pull request reviews',
+        'It disables merge conflict detection',
+      ],
+      correctAnswer: 0,
+      explanation: 'Rebasing replays feature commits on top of current main, avoiding noisy merge bubbles.',
+      topic: `${skill} Git Workflow & Version Control`,
+    }),
+  },
+  {
+    type: 'load_balancing',
+    make: (skill, diff, uid) => ({
+      question: `When deploying multiple backend instances of a ${skill} application behind a load balancer, how does Consistent Hashing minimize cache invalidation during horizontal node scaling? [Ref: ${uid}]`,
+      options: [
+        'It maps both servers and keys to a virtual hash ring, remapping only K/N keys when a server joins or leaves',
+        'It re-encrypts all database passwords on every request',
+        'It converts all TCP traffic into UDP datagrams',
+        'It forces all clients to connect to a single IP address',
+      ],
+      correctAnswer: 0,
+      explanation: 'Consistent hashing avoids remapping the entire key space when cluster capacity changes dynamically.',
+      topic: `${skill} Load Balancing & Distributed Architecture`,
+    }),
+  },
+  {
+    type: 'solid_principles',
+    make: (skill, diff, uid) => ({
+      question: `In software architecture and OOP with ${skill}, what is the core mandate of the Dependency Inversion Principle (DIP)? [Ref: ${uid}]`,
+      options: [
+        'High-level modules should depend on abstractions/interfaces rather than concrete low-level implementations',
+        'Subclasses should override all parent methods with empty functions',
+        'Every class must have exactly one line of code',
+        'All variables must be declared as global singletons',
+      ],
+      correctAnswer: 0,
+      explanation: 'DIP decouples high-level business rules from specific infrastructure implementations through interfaces.',
+      topic: `${skill} SOLID Design Principles`,
+    }),
+  },
+  {
+    type: 'dsa_complexity',
+    make: (skill, diff, uid) => ({
+      question: `When searching or inserting items in an AVL Tree or Red-Black Tree data structure in ${skill}, what is the worst-case time complexity guaranteed by self-balancing? [Ref: ${uid}]`,
+      options: [
+        'O(log n) time complexity because tree height is strictly bounded by logarithmic depth',
+        'O(n^2) quadratic time complexity',
+        'O(1) constant time with zero memory lookups',
+        'O(n!) factorial time complexity',
+      ],
+      correctAnswer: 0,
+      explanation: 'Balanced BSTs guarantee O(log n) height by performing rotations on insertions and deletions.',
+      topic: `${skill} Data Structures & Complexity`,
+    }),
+  },
+  {
+    type: 'event_driven_saga',
+    make: (skill, diff, uid) => ({
+      question: `In an event-driven distributed system involving ${skill}, how does the Saga pattern maintain data consistency across decoupled services without distributed two-phase commit (2PC) locks? [Ref: ${uid}]`,
+      options: [
+        'By executing a sequence of local transactions where failures trigger explicit compensating transactions in reverse order',
+        'By acquiring exclusive database table locks across all microservices simultaneously',
+        'By storing all service data in a single global CSV spreadsheet',
+        'By disabling transaction rollbacks completely',
+      ],
+      correctAnswer: 0,
+      explanation: 'Sagas coordinate local transactions and compensating actions via choreographies or orchestrators.',
+      topic: `${skill} Distributed Sagas & Event Architecture`,
+    }),
+  },
 ];
 
 /**
- * Generates exactly 10 unique, non-repeating quiz questions tailored to:
+ * Generates exactly 30 unique, non-repeating quiz questions tailored to:
  * - The COMPANY JD (primary driver)
  * - Required skills & technical topics
- * - Candidate's identified skill gaps
- * - Selected difficulty tier
- * - Past quiz attempts (with strict duplicate rejection)
+ * - Candidate's identified skill gaps & areas to focus
+ * - Dynamic refresh seeds with strict duplicate rejection
  */
-const generateUniqueQuizQuestions = ({
+const generateUniqueQuizQuestions = async ({
   studentId,
   targetJobId,
-  difficulty = 'easy',
+  difficulty = 'mixed',
+  count = 30,
+  company = 'Target Company',
+  jobTitle = 'Software Engineer',
+  jdText = '',
   resumeSkills = [],
   jdSkills = [],
   analysis = {},
   previousQuestions = [],
   weakTopics = [],
 }) => {
-  const diff = ['easy', 'medium', 'difficult'].includes(difficulty) ? difficulty : 'easy';
+  const targetCount = Math.max(1, count || 30);
+  const diff = ['easy', 'medium', 'difficult'].includes(difficulty) ? difficulty : 'mixed';
 
   // 1. EXTRACT ALL VALIDATED JD SKILLS
-  // Quizzes MUST be JD-driven. Skills appearing only in the resume are strictly excluded.
   const jdSkillSet = new Set();
   const jdPriorityMap = {};
 
@@ -917,6 +1439,16 @@ const generateUniqueQuizQuestions = ({
     });
   }
 
+  // Also include skills from areasToFocus / importantTopics
+  const focusAreas = analysis.areasToFocus || analysis.importantTopics || [];
+  focusAreas.forEach((item) => {
+    const skillName = typeof item === 'object' ? item.skill : item;
+    if (skillName && typeof skillName === 'string') {
+      jdSkillSet.add(skillName);
+      if (!jdPriorityMap[skillName]) jdPriorityMap[skillName] = 'high';
+    }
+  });
+
   // Also include any JD skills passed directly
   (jdSkills || []).forEach((s) => {
     if (s) {
@@ -925,17 +1457,17 @@ const generateUniqueQuizQuestions = ({
     }
   });
 
-  // If JD skills list is empty (edge case), derive from analysis topics or fallback to common engineering disciplines
+  // If JD skills list is empty (edge case), fallback to standard placement competencies
   if (jdSkillSet.size === 0) {
-    const fallbackList = ['React', 'Node.js', 'SQL', 'REST APIs', 'Docker'];
+    const fallbackList = ['React', 'Node.js', 'SQL', 'REST APIs', 'Docker', 'DSA', 'System Design', 'Linux', 'AWS'];
     fallbackList.forEach((s) => jdSkillSet.add(s));
   }
 
   // 2. PRIORITIZE QUESTIONS ACCORDING TO JD REQUIREMENTS & GAPS
   const prioritizedSkills = [];
 
-  // A. High-priority JD skills missing from resume (Top Priority)
-  const skillsToImprove = analysis.skillsToImprove || [];
+  // A. High-priority missing JD skills from resume (Top Priority)
+  const skillsToImprove = analysis.skillsToImprove || analysis.missingSkills || [];
   skillsToImprove.forEach((s) => {
     const skillName = typeof s === 'object' ? s.skill : s;
     if (skillName && jdSkillSet.has(skillName) && !prioritizedSkills.includes(skillName)) {
@@ -962,16 +1494,7 @@ const generateUniqueQuizQuestions = ({
     }
   });
 
-  // D. Partial skills in JD
-  const partialSkills = analysis.partialSkills || [];
-  partialSkills.forEach((s) => {
-    const skillName = typeof s === 'object' ? s.skill : s;
-    if (skillName && jdSkillSet.has(skillName) && !prioritizedSkills.includes(skillName)) {
-      prioritizedSkills.push(skillName);
-    }
-  });
-
-  // E. Matched JD skills for interview verification
+  // D. Matched JD skills for interview verification
   const matchedSkills = analysis.matchedSkills || [];
   matchedSkills.forEach((s) => {
     const skillName = typeof s === 'object' ? s.skill : s;
@@ -980,7 +1503,7 @@ const generateUniqueQuizQuestions = ({
     }
   });
 
-  // F. Any other JD skill not yet in the list
+  // E. Any other JD skill not yet in the list
   for (const s of jdSkillSet) {
     if (!prioritizedSkills.includes(s)) prioritizedSkills.push(s);
   }
@@ -1015,78 +1538,137 @@ const generateUniqueQuizQuestions = ({
   };
 
   const addQuestion = (candidate) => {
-    if (!candidate || !candidate.question) return false;
+    if (!candidate || !candidate.question || !Array.isArray(candidate.options)) return false;
     const norm = normalizeQuestionText(candidate.question);
     currentNormalizedSet.add(norm);
 
-    const questionId = `q_${diff}_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+    // Shuffle options so correct answer is randomly distributed among A, B, C, D
+    const originalOptions = candidate.options.map((opt) => (typeof opt === 'object' ? opt.text : opt));
+    const correctIdx = typeof candidate.correctAnswer === 'number'
+      ? candidate.correctAnswer
+      : typeof candidate.correctAnswerIndex === 'number'
+      ? candidate.correctAnswerIndex
+      : 0;
+
+    const indexedOptions = originalOptions.map((text, idx) => ({ text, isCorrect: idx === correctIdx }));
+    // Shuffle
+    const shuffled = [...indexedOptions].sort(() => Math.random() - 0.5);
+    const finalOptionsList = shuffled.map((o) => o.text);
+    const finalCorrectIndex = shuffled.findIndex((o) => o.isCorrect);
+
+    const questionDifficulty = candidate.difficulty || (diff === 'mixed' ? ['easy', 'medium', 'difficult'][finalQuestions.length % 3] : diff);
+    const questionId = `q_p30_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+
     finalQuestions.push({
       questionId,
       question: candidate.question,
       normalizedQuestion: norm,
-      options: candidate.options,
-      correctAnswer: candidate.correctAnswer,
+      options: finalOptionsList,
+      correctAnswer: finalCorrectIndex !== -1 ? finalCorrectIndex : 0,
       explanation: candidate.explanation || 'Refer to modern engineering standards and best practices.',
       topic: candidate.topic || 'Core Concept',
-      difficulty: diff,
+      difficulty: questionDifficulty,
     });
     return true;
   };
 
-  // 4. PASS 1: CURATED QUESTION BANK (STRICTLY FROM PRIORITIZED JD SKILLS)
-  for (const skill of prioritizedSkills) {
-    if (finalQuestions.length >= 10) break;
+  // -------------------------------------------------------------------------
+  // PASS 0: DYNAMIC GEMINI AI GENERATION (Real AI-generated tailored questions)
+  // -------------------------------------------------------------------------
+  const geminiQuestions = await generateGeminiAIQuizQuestions({
+    company,
+    jobTitle,
+    jdText,
+    matchedSkills: analysis.matchedSkills || [],
+    missingSkills: analysis.skillsToImprove || analysis.missingSkills || [],
+    prioritizedSkills,
+    previousQuestions,
+    targetCount,
+    diff,
+  });
+
+  for (const gq of geminiQuestions) {
+    if (finalQuestions.length >= targetCount) break;
+    if (isQuestionUnique(gq.question, 0.65)) {
+      addQuestion(gq);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // PASS 1: CURATED QUESTION BANK (RANDOM SHUFFLE PER SKILL & TIER)
+  // -------------------------------------------------------------------------
+  const shuffledSkills = [...prioritizedSkills].sort(() => Math.random() - 0.3);
+
+  for (const skill of shuffledSkills) {
+    if (finalQuestions.length >= targetCount) break;
     const bank = SKILL_QUESTION_BANK[skill];
     if (!bank) continue;
 
-    const available = bank[diff] || bank.medium || bank.easy || [];
-    for (const item of available) {
-      if (finalQuestions.length >= 10) break;
-      if (isQuestionUnique(item.question, 0.65)) {
-        addQuestion({ ...item, difficulty: diff });
+    const tiers = diff === 'mixed' ? ['easy', 'medium', 'difficult'] : [diff, 'medium', 'easy'];
+    for (const t of tiers) {
+      const available = bank[t] || [];
+      const shuffledAvailable = [...available].sort(() => Math.random() - 0.5);
+      for (const item of shuffledAvailable) {
+        if (finalQuestions.length >= targetCount) break;
+        if (isQuestionUnique(item.question, 0.65)) {
+          addQuestion({ ...item, difficulty: t });
+        }
       }
     }
   }
 
-  // 5. PASS 2: TECHNICAL SCENARIO GENERATORS FOR JD SKILLS (STRICT 0.65 THRESHOLD)
-  let scenarioIdx = 0;
+  // -------------------------------------------------------------------------
+  // PASS 2: TECHNICAL SCENARIO GENERATORS (RANDOM START OFFSET & SEEDS)
+  // -------------------------------------------------------------------------
+  let scenarioIdx = Math.floor(Math.random() * 1000);
   let attemptCount = 0;
-  const maxAttempts = 200;
+  const maxAttempts = 300;
 
-  while (finalQuestions.length < 10 && attemptCount < maxAttempts) {
+  while (finalQuestions.length < targetCount && attemptCount < maxAttempts) {
     attemptCount++;
     const skill = prioritizedSkills[scenarioIdx % prioritizedSkills.length];
     const generator = SCENARIO_GENERATORS[scenarioIdx % SCENARIO_GENERATORS.length];
+    const currentDiff = diff === 'mixed' ? ['easy', 'medium', 'difficult'][scenarioIdx % 3] : diff;
     scenarioIdx++;
 
-    const uid = `${diff.toUpperCase()}-${scenarioIdx}-${Date.now().toString().slice(-4)}`;
-    const candidate = generator.make(skill, diff, uid);
+    const uid = `S${scenarioIdx}-${Date.now().toString().slice(-4)}-${crypto.randomBytes(2).toString('hex')}`;
+    const candidate = generator.make(skill, currentDiff, uid);
 
     if (isQuestionUnique(candidate.question, 0.65)) {
       addQuestion(candidate);
     }
   }
 
-  // 6. PASS 3: RELAXED SIMILARITY (0.85 THRESHOLD) FOR GUARANTEED 10 QUESTIONS
-  let pass3Guard = 0;
-  while (finalQuestions.length < 10 && pass3Guard++ < 150) {
+  // -------------------------------------------------------------------------
+  // PASS 3: RELAXED SIMILARITY (0.85 THRESHOLD) FOR GUARANTEED TARGET QUESTIONS
+  // -------------------------------------------------------------------------
+  let pass3Guard = Math.floor(Math.random() * 500);
+  let pass3Count = 0;
+  while (finalQuestions.length < targetCount && pass3Count++ < 200) {
+    pass3Guard++;
     const skill = prioritizedSkills[pass3Guard % prioritizedSkills.length];
     const generator = SCENARIO_GENERATORS[pass3Guard % SCENARIO_GENERATORS.length];
-    const uid = `P3-${diff.toUpperCase()}-${pass3Guard}-${crypto.randomBytes(2).toString('hex')}`;
-    const candidate = generator.make(skill, diff, uid);
+    const currentDiff = diff === 'mixed' ? ['easy', 'medium', 'difficult'][pass3Guard % 3] : diff;
+    const uid = `P3-${pass3Guard}-${crypto.randomBytes(2).toString('hex')}`;
+    const candidate = generator.make(skill, currentDiff, uid);
 
     if (isQuestionUnique(candidate.question, 0.85)) {
       addQuestion(candidate);
     }
   }
 
-  // 7. PASS 4: ABSOLUTE STRING UNIQUENESS GUARANTEE
-  let pass4Guard = 0;
-  while (finalQuestions.length < 10 && pass4Guard++ < 50) {
+  // -------------------------------------------------------------------------
+  // PASS 4: ABSOLUTE STRING UNIQUENESS GUARANTEE (FALLBACK FILLER)
+  // -------------------------------------------------------------------------
+  let pass4Guard = Math.floor(Math.random() * 500);
+  let pass4Count = 0;
+  while (finalQuestions.length < targetCount && pass4Count++ < 100) {
+    pass4Guard++;
     const skill = prioritizedSkills[pass4Guard % prioritizedSkills.length];
     const generator = SCENARIO_GENERATORS[pass4Guard % SCENARIO_GENERATORS.length];
-    const uid = `G-${diff.toUpperCase()}-${pass4Guard}-${crypto.randomBytes(3).toString('hex')}`;
-    const candidate = generator.make(skill, diff, uid);
+    const currentDiff = diff === 'mixed' ? ['easy', 'medium', 'difficult'][pass4Guard % 3] : diff;
+    const uid = `G-${pass4Guard}-${crypto.randomBytes(3).toString('hex')}`;
+    const candidate = generator.make(skill, currentDiff, uid);
     const norm = normalizeQuestionText(candidate.question);
 
     if (!previousNormalizedSet.has(norm) && !currentNormalizedSet.has(norm)) {
@@ -1094,7 +1676,7 @@ const generateUniqueQuizQuestions = ({
     }
   }
 
-  return finalQuestions.slice(0, 10);
+  return finalQuestions.slice(0, targetCount);
 };
 
 module.exports = {

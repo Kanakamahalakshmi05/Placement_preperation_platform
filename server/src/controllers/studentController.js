@@ -1,7 +1,7 @@
 const Resume = require('../models/Resume');
 const JobTarget = require('../models/JobTarget');
 const StudentProgress = require('../models/StudentProgress');
-const { getAIClient } = require('../config/aiConfig');
+const { getAIClient, GEMINI_MODEL } = require('../config/aiConfig');
 const {
   analyzeSkillGap,
 } = require('../services/resumeParserService');
@@ -303,12 +303,12 @@ ${(jobTarget.jobDescription || '').trim()}
    - Identify every required and preferred technology, language, framework, database, tool, and CS concept in the JD.
 
 2. MATCHED SKILLS (Resume + JD Overlap):
-   - Include ONLY skills required/relevant in the JD where the candidate's resume provides concrete project evidence, work experience, or verifiable implementation.
-   - Quote or summarize the specific resume evidence.
-   - DO NOT include skills from the resume that are irrelevant to this JD.
+   - Include EVERY skill required/preferred in the JD where the candidate's resume explicitly mentions or provides evidence for that skill (in Technical Skills, Projects, Experience, Coursework, Certifications, or Overview).
+   - Quote or summarize the specific resume evidence (e.g. project quote or listing).
+   - NEVER classify a skill as missing if it is present anywhere in the candidate's resume.
 
 3. MISSING SKILLS:
-   - Identify skills required or preferred by the JD that are completely missing or lack verifiable project depth in the resume.
+   - Include ONLY skills required or preferred by the JD that are COMPLETELY ABSENT from the candidate's resume.
    - Categorize importance: "high" (core must-have) or "medium" (good-to-have / preferred).
    - Provide a clear reason explaining why the company requires this skill for this role.
 
@@ -357,7 +357,7 @@ Return ONLY a valid JSON object matching this schema (no markdown formatting, no
 }`;
 
         const resp = await aiClient.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: GEMINI_MODEL,
           contents: prompt,
         });
 
@@ -365,10 +365,10 @@ Return ONLY a valid JSON object matching this schema (no markdown formatting, no
         const parsed = JSON.parse(clean);
 
         if (parsed && typeof parsed === 'object') {
-          const aiMatched = Array.isArray(parsed.matchedSkills)
+          let aiMatched = Array.isArray(parsed.matchedSkills)
             ? parsed.matchedSkills.map((m) => (typeof m === 'object' ? m.skill : m)).filter(Boolean)
             : [];
-          const aiMissing = Array.isArray(parsed.missingSkills)
+          let aiMissing = Array.isArray(parsed.missingSkills)
             ? parsed.missingSkills.map((s) => (typeof s === 'object' ? s.skill : s)).filter(Boolean)
             : Array.isArray(parsed.skillsToImprove)
             ? parsed.skillsToImprove.map((s) => (typeof s === 'object' ? s.skill : s)).filter(Boolean)
@@ -379,32 +379,80 @@ Return ONLY a valid JSON object matching this schema (no markdown formatting, no
             ? parsed.importantTopics.map((t) => (typeof t === 'object' ? t.topic : t)).filter(Boolean)
             : [];
 
-          if (aiMatched.length > 0 || aiMissing.length > 0) {
-            const areasDetailed = Array.isArray(parsed.areasToFocus)
-              ? parsed.areasToFocus
-              : Array.isArray(parsed.importantTopics)
-              ? parsed.importantTopics
-              : finalAnalysis.areasToFocusDetailed;
+          // === HYBRID GUARD VALIDATOR ===
+          // Cross-verify every skill against the candidate's resume ground-truth
+          const verifiedMatched = new Set(deterministicAnalysis.matchedSkills || []);
+          aiMatched.forEach((s) => verifiedMatched.add(s));
 
-            finalAnalysis = {
-              jdRequirements: parsed.jdRequirements || finalAnalysis.jdRequirements,
-              matchedSkills: aiMatched.length > 0 ? aiMatched : finalAnalysis.matchedSkills,
-              matchedSkillsDetailed: parsed.matchedSkills || finalAnalysis.matchedSkillsDetailed,
-              missingSkills: aiMissing.length > 0 ? aiMissing : finalAnalysis.missingSkills || finalAnalysis.skillsToImprove,
-              missingSkillsDetailed: parsed.missingSkills || parsed.skillsToImprove || finalAnalysis.missingSkillsDetailed || finalAnalysis.skillsToImproveDetailed,
-              partialSkills: Array.isArray(parsed.partialSkills)
-                ? parsed.partialSkills.map((p) => (typeof p === 'object' ? p.skill : p))
-                : finalAnalysis.partialSkills,
-              partialSkillsDetailed: parsed.partialSkills || finalAnalysis.partialSkillsDetailed,
-              skillsToImprove: aiMissing.length > 0 ? aiMissing : finalAnalysis.skillsToImprove,
-              skillsToImproveDetailed: parsed.missingSkills || parsed.skillsToImprove || finalAnalysis.skillsToImproveDetailed,
-              areasToFocus: aiAreas.length > 0 ? aiAreas : finalAnalysis.areasToFocus || finalAnalysis.importantTopics,
-              areasToFocusDetailed: areasDetailed,
-              importantTopics: aiAreas.length > 0 ? aiAreas : finalAnalysis.importantTopics,
-              importantTopicsDetailed: areasDetailed,
-              preparationPriority: parsed.preparationPriority || finalAnalysis.preparationPriority,
+          const verifiedMissing = new Set();
+          aiMissing.forEach((skillName) => {
+            const evidence = findResumeSkillEvidence(resume.rawText || '', skillName);
+            if (evidence.found) {
+              // Skill is actually present in resume; move to matched
+              verifiedMatched.add(skillName);
+            } else {
+              // True missing gap
+              verifiedMissing.add(skillName);
+            }
+          });
+
+          // Ensure any deterministic missing skills that are in JD requirements are captured
+          (deterministicAnalysis.missingSkills || []).forEach((skillName) => {
+            const evidence = findResumeSkillEvidence(resume.rawText || '', skillName);
+            if (!evidence.found) {
+              verifiedMissing.add(skillName);
+            }
+          });
+
+          const finalMatchedList = Array.from(verifiedMatched);
+          const finalMissingList = Array.from(verifiedMissing).filter((s) => !verifiedMatched.has(s));
+
+          const matchedDetailed = finalMatchedList.map((skillName) => {
+            const aiDetail = (parsed.matchedSkills || []).find(
+              (m) => typeof m === 'object' && m.skill?.toLowerCase() === skillName.toLowerCase()
+            );
+            const groundTruth = findResumeSkillEvidence(resume.rawText || '', skillName);
+            return {
+              skill: skillName,
+              evidence: aiDetail?.evidence || groundTruth.evidence || 'Verified in candidate resume.',
+              strength: groundTruth.strength || aiDetail?.strength || 'strong',
+              importance: aiDetail?.importance || 'high',
             };
-          }
+          });
+
+          const missingDetailed = finalMissingList.map((skillName) => {
+            const aiDetail = (parsed.missingSkills || parsed.skillsToImprove || []).find(
+              (s) => typeof s === 'object' && s.skill?.toLowerCase() === skillName.toLowerCase()
+            );
+            return {
+              skill: skillName,
+              importance: aiDetail?.importance || 'high',
+              reason: aiDetail?.reason || 'Required in JD but not demonstrated in resume projects.',
+            };
+          });
+
+          const areasDetailed = Array.isArray(parsed.areasToFocus) && parsed.areasToFocus.length > 0
+            ? parsed.areasToFocus
+            : Array.isArray(parsed.importantTopics) && parsed.importantTopics.length > 0
+            ? parsed.importantTopics
+            : finalAnalysis.areasToFocusDetailed;
+
+          finalAnalysis = {
+            jdRequirements: parsed.jdRequirements || finalAnalysis.jdRequirements,
+            matchedSkills: finalMatchedList.length > 0 ? finalMatchedList : finalAnalysis.matchedSkills,
+            matchedSkillsDetailed: matchedDetailed.length > 0 ? matchedDetailed : finalAnalysis.matchedSkillsDetailed,
+            missingSkills: finalMissingList,
+            missingSkillsDetailed: missingDetailed,
+            partialSkills: [],
+            partialSkillsDetailed: [],
+            skillsToImprove: finalMissingList,
+            skillsToImproveDetailed: missingDetailed,
+            areasToFocus: aiAreas.length > 0 ? aiAreas : finalAnalysis.areasToFocus,
+            areasToFocusDetailed: areasDetailed,
+            importantTopics: aiAreas.length > 0 ? aiAreas : finalAnalysis.importantTopics,
+            importantTopicsDetailed: areasDetailed,
+            preparationPriority: parsed.preparationPriority || finalAnalysis.preparationPriority,
+          };
         }
       } catch (geminiErr) {
         console.warn('[AI Analysis] Gemini structured analysis fallback to deterministic engine:', geminiErr.message);

@@ -3,7 +3,7 @@ const TechnicalInterview = require('../models/TechnicalInterview');
 const Resume = require('../models/Resume');
 const JobTarget = require('../models/JobTarget');
 const Analysis = require('../models/Analysis');
-const { getAIClient } = require('../config/aiConfig');
+const { getAIClient, GEMINI_MODEL } = require('../config/aiConfig');
 
 /**
  * Normalizes question text for similarity comparisons.
@@ -113,7 +113,7 @@ Return ONLY a valid JSON object matching this schema:
 }`;
 
       const response = await aiClient.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: GEMINI_MODEL,
         contents: prompt,
       });
 
@@ -760,7 +760,7 @@ Return ONLY a valid JSON object matching this schema:
 }`;
 
       const response = await aiClient.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: GEMINI_MODEL,
         contents: prompt,
       });
 
@@ -1453,7 +1453,7 @@ Return ONLY a valid JSON object matching this schema:
 }`;
 
       const response = await aiClient.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: GEMINI_MODEL,
         contents: prompt,
         config: {
           temperature: 0.1,
@@ -1871,7 +1871,7 @@ Return ONLY a valid JSON object matching this schema:
 }`;
 
       const response = await aiClient.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: GEMINI_MODEL,
         contents: prompt,
       });
 
@@ -2142,7 +2142,7 @@ Return ONLY a valid JSON object matching this schema:
 }`;
 
       const response = await aiClient.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: GEMINI_MODEL,
         contents: prompt,
       });
 

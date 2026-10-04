@@ -12,14 +12,9 @@ const { analyzeSkillGap } = require('../services/resumeParserService');
 const generateQuiz = async (req, res, next) => {
   try {
     const studentId = req.user._id;
-    const difficulty = (req.body.difficulty || req.params.difficulty || 'easy').toLowerCase();
-
-    if (!['easy', 'medium', 'difficult'].includes(difficulty)) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid difficulty level. Must be "easy", "medium", or "difficult".',
-      });
-    }
+    const count = parseInt(req.body.count || req.query.count || 30, 10);
+    const rawDiff = (req.body.difficulty || req.params.difficulty || 'mixed').toLowerCase();
+    const difficulty = ['easy', 'medium', 'difficult'].includes(rawDiff) ? rawDiff : 'mixed';
 
     // 1. Retrieve latest Resume and Target Job
     const [resume, jobTarget] = await Promise.all([
@@ -64,18 +59,17 @@ const generateQuiz = async (req, res, next) => {
       };
     }
 
-    // 3. Retrieve history of previous attempts for this student + targetJob + difficulty
+    // 3. Retrieve history of previous attempts for this student + targetJob
     const previousAttempts = await QuizAttempt.find({
       studentId,
       targetJobId: jobTarget._id,
-      difficulty,
     }).sort({ createdAt: -1 });
 
-    // Collect all previously asked question strings
+    // Collect all previously asked question strings (up to recent 150 questions) to guarantee uniqueness on refresh
     const previousQuestions = [];
     const priorWeakTopics = [];
 
-    previousAttempts.forEach((attempt) => {
+    previousAttempts.slice(0, 5).forEach((attempt) => {
       (attempt.questions || []).forEach((q) => {
         if (q.question) previousQuestions.push(q.question);
         if (q.normalizedQuestion) previousQuestions.push(q.normalizedQuestion);
@@ -87,11 +81,15 @@ const generateQuiz = async (req, res, next) => {
       }
     });
 
-    // 4. Generate 10 NEW unique questions with zero repetition
-    const questions = generateUniqueQuizQuestions({
+    // 4. Generate 30 NEW unique practice questions aligned with candidate skills & target JD
+    const questions = await generateUniqueQuizQuestions({
       studentId,
       targetJobId: jobTarget._id,
       difficulty,
+      count,
+      company: jobTarget.company || 'Target Company',
+      jobTitle: jobTarget.targetRole || 'Software Engineer',
+      jdText: jobTarget.jobDescription || '',
       resumeSkills: resume.parsedSkills || [],
       jdSkills: jobTarget.extractedSkills || [],
       analysis: analysisData,
@@ -123,7 +121,7 @@ const generateQuiz = async (req, res, next) => {
 
     res.status(200).json({
       success: true,
-      message: `Generated 10 new ${difficulty} questions for attempt #${attemptNumber}.`,
+      message: `Generated ${clientQuestions.length} personalized practice questions for attempt #${attemptNumber}.`,
       data: {
         quizId: newAttempt._id,
         difficulty,
